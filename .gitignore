@@ -1,0 +1,41 @@
+# ============================================================
+# DADOS PESSOAIS - nunca vão para o repositório
+# ============================================================
+
+# Fotos de treino (imagens de pessoas). A estrutura de pastas é
+# mantida pelos arquivos .gitkeep, mas as imagens ficam só no computador.
+dataset/*/*
+!dataset/*/.gitkeep
+
+# Log de auditoria e fotos de evidência (gerados pelo programa)
+auditoria/
+
+# ============================================================
+# ARQUIVOS LOCAIS
+# ============================================================
+
+# Cópia de segurança da versão antiga do código
+_versao_anterior/
+
+# Configurações locais de ferramentas
+.claude/
+.vscode/
+.idea/
+
+# ============================================================
+# PYTHON
+# ============================================================
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# ============================================================
+# SISTEMA OPERACIONAL
+# ============================================================
+
+Thumbs.db
+desktop.ini
+.DS_Store
