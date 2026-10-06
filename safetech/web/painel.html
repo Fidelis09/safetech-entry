@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SafeTech Entry - Painel do gerente</title>
+
+<!--
+  PAINEL WEB DO GERENTE (somente leitura)
+
+  Página única, sem bibliotecas externas: funciona sem internet.
+  Ela apenas CONSULTA o servidor do aplicativo:
+
+      /api/ao-vivo    a cada 1 s   -> status da catraca e imagem da câmera
+      /api/historico  a cada 4 s   -> indicadores, gráfico e tabela de eventos
+
+  Não existe nenhum botão ou chamada que altere o sistema.
+-->
+
+<style>
+  /* ============================================================
+     CORES E MEDIDAS (as mesmas do aplicativo de mesa)
+     ============================================================ */
+  :root {
+    --fundo: #0f1318;
+    --painel: #171c23;
+    --cartao: #1f262f;
+    --borda: #2c3642;
+    --texto: #e8edf2;
+    --texto-suave: #8d9aab;
+    --destaque: #3b82f6;
+    --sucesso: #16a34a;
+    --sucesso-claro: #4ade80;
+    --perigo: #dc2626;
+    --perigo-claro: #f87171;
+    --alerta: #d97706;
+    --neutro: #334155;
+    --raio: 10px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--fundo);
+    color: var(--texto);
+    font: 14px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+
+  /* ============================================================
+     CABEÇALHO
+     ============================================================ */
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--borda);
+  }
+
+  header h1 { margin: 0; font-size: 19px; }
+
+  header .subtitulo { color: var(--texto-suave); }
+
+  .etiqueta {
+    padding: 3px 10px;
+    border: 1px solid var(--borda);
+    border-radius: 999px;
+    color: var(--texto-suave);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .conexao { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--texto-suave); font-size: 12px; }
+
+  .ponto { width: 9px; height: 9px; border-radius: 50%; background: var(--texto-suave); }
+  .ponto.ok { background: var(--sucesso-claro); }
+  .ponto.falha { background: var(--perigo-claro); }
+
+  /* ============================================================
+     GRADE PRINCIPAL (uma coluna em telas estreitas)
+     ============================================================ */
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 4fr);
+    gap: 16px;
+    padding: 16px 24px 32px;
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+    header { padding: 12px; }
+  }
+
+  .secao {
+    background: var(--painel);
+    border-radius: var(--raio);
+    padding: 16px;
+    min-width: 0;
+  }
+
+  .secao.larga { grid-column: 1 / -1; }
+
+  .secao h2 { margin: 0 0 12px; font-size: 15px; }
+
+  .secao .apoio { color: var(--texto-suave); font-size: 12px; font-weight: normal; margin-left: 8px; }
+
+  /* ============================================================
+     AO VIVO
+     ============================================================ */
+  .video {
+    position: relative;
+    background: #000;
+    border: 1px solid var(--borda);
+    border-radius: 8px;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+  }
+
+  .video img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+  .video .mensagem { color: var(--texto-suave); text-align: center; padding: 16px; }
+
+  .faixa {
+    margin-top: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--neutro);
+    color: #fff;
+  }
+
+  .faixa strong { display: block; font-size: 20px; letter-spacing: .3px; }
+
+  .faixa.liberado { background: var(--sucesso); }
+  .faixa.negado { background: var(--perigo); }
+  .faixa.analisando { background: var(--alerta); }
+
+  .pessoas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+  /* ============================================================
+     MARCADORES DE STATUS (sempre símbolo + texto, nunca só cor)
+     ============================================================ */
+  .marcador {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--cartao);
+    white-space: nowrap;
+  }
+
+  .marcador::before { content: "•"; font-weight: bold; color: var(--texto-suave); }
+  .marcador.liberado::before { content: "✓"; color: var(--sucesso-claro); }
+  .marcador.negado::before { content: "✕"; color: var(--perigo-claro); }
+
+  /* ============================================================
+     INDICADORES
+     ============================================================ */
+  .indicadores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+  .indicador { background: var(--cartao); border-radius: 8px; padding: 12px 14px; }
+
+  .indicador .titulo { color: var(--texto-suave); font-size: 12px; }
+  .indicador .valor { font-size: 30px; font-weight: 700; line-height: 1.2; }
+  .indicador .rodape { color: var(--texto-suave); font-size: 12px; }
+
+  /* ============================================================
+     GRÁFICO
+     ============================================================ */
+  .legenda { display: flex; gap: 16px; color: var(--texto-suave); font-size: 12px; margin: 14px 0 4px; }
+
+  .legenda span { display: inline-flex; align-items: center; gap: 6px; }
+
+  .legenda svg { width: 12px; height: 12px; border-radius: 3px; }
+
+  .grafico { position: relative; }
+
+  .grafico svg { width: 100%; height: auto; display: block; }
+
+  .grafico text { fill: var(--texto-suave); font-size: 11px; }
+
+  .grafico .grade { stroke: var(--borda); stroke-width: 1; }
+
+  .grafico .alvo { fill: transparent; }
+  .grafico .alvo:hover { fill: rgba(255, 255, 255, .06); }
+
+  .dica {
+    position: absolute;
+    pointer-events: none;
+    background: #0b0e12;
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+    transform: translate(-50%, -100%);
+    display: none;
+  }
+
+  .vazio { color: var(--texto-suave); text-align: center; padding: 24px 8px; }
+
+  /* ============================================================
+     TABELA DE EVENTOS
+     ============================================================ */
+  .filtros { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+
+  .filtros button {
+    background: var(--cartao);
+    color: var(--texto-suave);
+    border: 0;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .filtros button[aria-pressed="true"] { background: var(--destaque); color: #fff; }
+
+  .filtros input {
+    flex: 1;
+    min-width: 160px;
+    background: var(--cartao);
+    color: var(--texto);
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font: inherit;
+  }
+
+  .rolagem { overflow-x: auto; max-height: 520px; overflow-y: auto; border-radius: 8px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--cartao); }
+
+  th, td { padding: 8px 12px; text-align: left; white-space: nowrap; }
+
+  th { position: sticky; top: 0; background: var(--painel); color: var(--texto-suave); font-size: 12px; }
+
+  tbody tr { border-top: 1px solid var(--borda); cursor: pointer; }
+
+  tbody tr:hover, tbody tr:focus { background: #28313c; outline: none; }
+
+  td.numero { font-variant-numeric: tabular-nums; }
+
+  td img { width: 72px; height: 44px; object-fit: cover; border-radius: 4px; display: block; background: #000; }
+
+  /* ============================================================
+     JANELA DA FOTO DE EVIDÊNCIA
+     ============================================================ */
+  dialog {
+    background: var(--painel);
+    color: var(--texto);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    padding: 16px;
+    max-width: min(960px, 94vw);
+  }
+
+  dialog::backdrop { background: rgba(0, 0, 0, .7); }
+
+  dialog img { max-width: 100%; max-height: 70vh; display: block; border-radius: 6px; margin: 0 auto; }
+
+  dialog .detalhes { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 12px 0; }
+
+  dialog button {
+    background: var(--cartao);
+    color: var(--texto);
+    border: 0;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>SafeTech Entry</h1>
+  <span class="subtitulo">Painel do gerente</span>
+  <span class="etiqueta">Somente leitura</span>
+  <div class="conexao">
+    <span class="ponto" id="ponto-conexao"></span>
+    <span id="texto-conexao">Conectando...</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ====================== AO VIVO ====================== -->
+  <section class="secao">
+    <h2>Ao vivo</h2>
+
+    <div class="video">
+      <img id="imagem-ao-vivo" alt="Imagem atual da câmera da catraca" hidden>
+      <div class="mensagem" id="mensagem-video">Aguardando o aplicativo...</div>
+    </div>
+
+    <div class="faixa" id="faixa-status">
+      <strong id="titulo-status">-</strong>
+      <span id="detalhe-status"></span>
+    </div>
+
+    <div class="pessoas" id="lista-pessoas"></div>
+  </section>
+
+  <!-- ====================== INDICADORES E GRÁFICO ====================== -->
+  <section class="secao">
+    <h2>Hoje</h2>
+
+    <div class="indicadores">
+      <div class="indicador">
+        <div class="titulo">Eventos</div>
+        <div class="valor" id="hoje-total">0</div>
+        <div class="rodape" id="geral-total"></div>
+      </div>
+      <div class="indicador">
+        <div class="titulo">Taxa de liberação</div>
+        <div class="valor" id="hoje-taxa">-</div>
+        <div class="rodape" id="geral-taxa"></div>
+      </div>
+      <div class="indicador">
+        <div class="titulo">Liberados</div>
+        <div class="valor" id="hoje-liberados">0</div>
+        <div class="rodape" id="geral-liberados"></div>
+      </div>
+      <div class="indicador">
+        <div class="titulo">Negados</div>
+        <div class="valor" id="hoje-negados">0</div>
+        <div class="rodape" id="geral-negados"></div>
+      </div>
+    </div>
+
+    <div class="legenda">
+      <strong style="color: var(--texto)">Eventos por hora</strong>
+      <span><svg><rect width="12" height="12" fill="var(--sucesso)"/></svg>Liberados</span>
+      <span><svg><rect width="12" height="12" fill="var(--perigo)"/><path d="M-2 6 6 -2M2 14 14 2M6 14 14 6" stroke="#fff" stroke-opacity=".55"/></svg>Negados</span>
+    </div>
+
+    <div class="grafico" id="grafico">
+      <div class="dica" id="dica-grafico"></div>
+    </div>
+  </section>
+
+  <!-- ====================== EVENTOS ====================== -->
+  <section class="secao larga">
+    <h2>Eventos de auditoria <span class="apoio" id="contagem-eventos"></span></h2>
+
+    <div class="filtros">
+      <button type="button" data-filtro="todos" aria-pressed="true">Todos</button>
+      <button type="button" data-filtro="SIM" aria-pressed="false">Liberados</button>
+      <button type="button" data-filtro="NAO" aria-pressed="false">Negados</button>
+      <input type="search" id="busca" placeholder="Buscar por data, pessoa, classe..." aria-label="Buscar eventos">
+    </div>
+
+    <div class="rolagem">
+      <table>
+        <thead>
+          <tr>
+            <th>Foto</th>
+            <th>Data e hora</th>
+            <th>Evento</th>
+            <th>Pessoa</th>
+            <th>Classe</th>
+            <th>Confiança</th>
+            <th>Acesso</th>
+          </tr>
+        </thead>
+        <tbody id="corpo-tabela"></tbody>
+      </table>
+      <div class="vazio" id="tabela-vazia" hidden>Nenhum evento encontrado.</div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ====================== FOTO DE EVIDÊNCIA ====================== -->
+<dialog id="janela-foto" aria-label="Foto de evidência">
+  <img id="foto-grande" alt="Foto de evidência do evento">
+  <div class="detalhes" id="detalhes-foto"></div>
+  <form method="dialog"><button>Fechar</button></form>
+</dialog>
+
+
+<script>
+"use strict";
+
+// ============================================================
+// ATALHOS E ESTADO DA PÁGINA
+// ============================================================
+
+const el = (id) => document.getElementById(id);
+
+const INTERVALO_AO_VIVO_MS = 1000;
+const INTERVALO_HISTORICO_MS = 4000;
+
+let eventos = [];            // últimos eventos recebidos do servidor
+let filtroAcesso = "todos";  // "todos", "SIM" ou "NAO"
+let assinaturaHistorico = "";  // para só redesenhar quando algo mudar
+
+
+// Cria um elemento com texto. O texto entra como TEXTO (textContent),
+// nunca como HTML: nada vindo do servidor é interpretado como código.
+function criar(tag, texto, classe) {
+  const elemento = document.createElement(tag);
+  if (texto !== undefined) elemento.textContent = texto;
+  if (classe) elemento.className = classe;
+  return elemento;
+}
+
+function porcentagem(parte, total) {
+  return total ? Math.round(parte / total * 100) + "%" : "-";
+}
+
+function marcarConexao(ok) {
+  el("ponto-conexao").className = "ponto " + (ok ? "ok" : "falha");
+  el("texto-conexao").textContent = ok
+    ? "Atualizado às " + new Date().toLocaleTimeString("pt-BR")
+    : "Sem conexão com o aplicativo";
+}
+
+
+// ============================================================
+// AO VIVO
+// ============================================================
+
+const TEXTOS_ACESSO = {
+  liberado: "ACESSO LIBERADO",
+  negado: "ACESSO NEGADO",
+  analisando: "ANALISANDO",
+  sem_pessoas: "AGUARDANDO",
+};
+
+async function atualizarAoVivo() {
+  try {
+    const resposta = await fetch("/api/ao-vivo", { cache: "no-store" });
+    if (!resposta.ok) throw new Error(resposta.status);
+    desenharAoVivo(await resposta.json());
+    marcarConexao(true);
+  } catch (erro) {
+    marcarConexao(false);
+    mostrarSemVideo("Sem conexão com o aplicativo.");
+  }
+}
+
+function mostrarSemVideo(texto) {
+  el("imagem-ao-vivo").hidden = true;
+  el("mensagem-video").hidden = false;
+  el("mensagem-video").textContent = texto;
+}
+
+function desenharAoVivo(dados) {
+  const faixa = el("faixa-status");
+  const lista = el("lista-pessoas");
+
+  lista.replaceChildren();
+
+  if (!dados.camera_ativa) {
+    mostrarSemVideo(dados.disponivel
+      ? "Câmera desligada no aplicativo."
+      : "Painel em modo histórico: o aplicativo da catraca não está aberto.");
+    faixa.className = "faixa";
+    el("titulo-status").textContent = "CÂMERA DESLIGADA";
+    el("detalhe-status").textContent = "O histórico abaixo continua disponível.";
+    return;
+  }
+
+  // A imagem é buscada de novo a cada ciclo; o número no endereço
+  // impede o navegador de reaproveitar a imagem anterior.
+  const imagem = el("imagem-ao-vivo");
+  imagem.src = "/ao-vivo.jpg?t=" + Date.now();
+  imagem.hidden = false;
+  el("mensagem-video").hidden = true;
+
+  const total = dados.pessoas.length;
+  const liberadas = dados.pessoas.filter((p) => p.status === "liberado").length;
+  const negadas = dados.pessoas.filter((p) => p.status === "negado").length;
+
+  faixa.className = "faixa " + (dados.acesso === "sem_pessoas" ? "" : dados.acesso);
+  el("titulo-status").textContent = TEXTOS_ACESSO[dados.acesso] || dados.acesso;
+  el("detalhe-status").textContent = total === 0
+    ? "Nenhuma pessoa na frente da câmera."
+    : total + (total === 1 ? " pessoa" : " pessoas") + " na imagem: "
+      + liberadas + " com EPI, " + negadas + " sem EPI.";
+
+  for (const pessoa of dados.pessoas) {
+    const texto = pessoa.status === "analisando"
+      ? "#" + pessoa.identificador + " analisando"
+      : "#" + pessoa.identificador + " " + pessoa.classe + " " + pessoa.confianca.toFixed(0) + "%";
+    lista.append(criar("span", texto, "marcador " + pessoa.status));
+  }
+}
+
+
+// ============================================================
+// HISTÓRICO (indicadores, gráfico e tabela)
+// ============================================================
+
+async function atualizarHistorico() {
+  try {
+    const resposta = await fetch("/api/historico", { cache: "no-store" });
+    if (!resposta.ok) throw new Error(resposta.status);
+    const dados = await resposta.json();
+
+    // Só redesenha quando chegou evento novo (ou virou o dia)
+    const assinatura = dados.geral.total + "|" + (dados.eventos[0]?.timestamp || "") + "|" + dados.gerado_em.slice(0, 10);
+    if (assinatura === assinaturaHistorico) return;
+    assinaturaHistorico = assinatura;
+
+    eventos = dados.eventos;
+
+    desenharIndicadores(dados);
+    desenharGrafico(dados.por_hora);
+    desenharTabela();
+  } catch (erro) {
+    // A falha de conexão já é mostrada pelo ciclo do "ao vivo"
+  }
+}
+
+function desenharIndicadores({ hoje, geral }) {
+  el("hoje-total").textContent = hoje.total;
+  el("hoje-liberados").textContent = hoje.liberados;
+  el("hoje-negados").textContent = hoje.negados;
+  el("hoje-taxa").textContent = porcentagem(hoje.liberados, hoje.total);
+
+  el("geral-total").textContent = geral.total + " no histórico";
+  el("geral-liberados").textContent = geral.liberados + " no histórico";
+  el("geral-negados").textContent = geral.negados + " no histórico";
+  el("geral-taxa").textContent = porcentagem(geral.liberados, geral.total) + " no histórico";
+}
+
+
+// ------------------------------------------------------------
+// GRÁFICO: barras empilhadas por hora (liberados embaixo, negados em cima)
+// ------------------------------------------------------------
+//
+// Os negados têm hachura além da cor, para quem não distingue
+// verde de vermelho. Passar o mouse numa hora mostra os números.
+// ------------------------------------------------------------
+
+const SVG = "http://www.w3.org/2000/svg";
+
+function svg(tag, atributos) {
+  const elemento = document.createElementNS(SVG, tag);
+  for (const [nome, valor] of Object.entries(atributos)) elemento.setAttribute(nome, valor);
+  return elemento;
+}
+
+// Retângulo com os dois cantos de cima arredondados
+function barra(x, y, largura, altura, raio) {
+  raio = Math.min(raio, altura, largura / 2);
+  return `M${x},${y + altura} V${y + raio} Q${x},${y} ${x + raio},${y} H${x + largura - raio} Q${x + largura},${y} ${x + largura},${y + raio} V${y + altura} Z`;
+}
+
+function desenharGrafico(porHora) {
+  const area = el("grafico");
+  const dica = el("dica-grafico");
+
+  area.querySelector("svg")?.remove();
+  area.querySelector(".vazio")?.remove();
+
+  const maior = Math.max(...porHora.map((h) => h.liberados + h.negados));
+
+  if (maior === 0) {
+    area.append(criar("div", "Nenhum evento registrado hoje.", "vazio"));
+    return;
+  }
+
+  // Medidas do desenho (o SVG se ajusta à largura da página)
+  const L = 720, A = 230;
+  const margem = { esquerda: 30, direita: 8, topo: 10, base: 24 };
+  const larguraUtil = L - margem.esquerda - margem.direita;
+  const alturaUtil = A - margem.topo - margem.base;
+  const passo = larguraUtil / 24;
+  const larguraBarra = Math.min(18, passo - 6);
+
+  // Topo do eixo: um número "redondo" acima do maior valor
+  const degrau = Math.max(1, Math.ceil(maior / 4));
+  const topo = degrau * Math.ceil(maior / degrau);
+  const y = (valor) => margem.topo + alturaUtil * (1 - valor / topo);
+
+  const desenho = svg("svg", { viewBox: `0 0 ${L} ${A}`, role: "img", "aria-label": "Eventos por hora de hoje, liberados e negados" });
+
+  // Padrão de hachura dos negados
+  const definicoes = svg("defs", {});
+  const padrao = svg("pattern", { id: "hachura", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+  padrao.append(svg("rect", { width: 6, height: 6, fill: "var(--perigo)" }));
+  padrao.append(svg("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "#fff", "stroke-opacity": .55, "stroke-width": 2 }));
+  definicoes.append(padrao);
+  desenho.append(definicoes);
+
+  // Linhas de grade e números do eixo vertical
+  for (let valor = 0; valor <= topo; valor += degrau) {
+    desenho.append(svg("line", { class: "grade", x1: margem.esquerda, x2: L - margem.direita, y1: y(valor), y2: y(valor) }));
+    const rotulo = svg("text", { x: margem.esquerda - 6, y: y(valor) + 4, "text-anchor": "end" });
+    rotulo.textContent = valor;
+    desenho.append(rotulo);
+  }
+
+  porHora.forEach((hora, indice) => {
+    const centro = margem.esquerda + passo * (indice + .5);
+    const x = centro - larguraBarra / 2;
+    const base = y(0);
+
+    const alturaLiberados = base - y(hora.liberados);
+    const alturaNegados = base - y(hora.negados);
+
+    // Vão de 2 px entre os dois segmentos
+    const vao = hora.liberados && hora.negados ? 2 : 0;
+
+    if (hora.liberados) {
+      desenho.append(svg("path", {
+        d: barra(x, base - alturaLiberados, larguraBarra, alturaLiberados, hora.negados ? 0 : 4),
+        fill: "var(--sucesso)",
+      }));
+    }
+
+    if (hora.negados) {
+      desenho.append(svg("path", {
+        d: barra(x, base - alturaLiberados - alturaNegados, larguraBarra, Math.max(1, alturaNegados - vao), 4),
+        fill: "url(#hachura)",
+      }));
+    }
+
+    // Rótulo do eixo horizontal de 3 em 3 horas
+    if (indice % 3 === 0) {
+      const rotulo = svg("text", { x: centro, y: A - 6, "text-anchor": "middle" });
+      rotulo.textContent = indice + "h";
+      desenho.append(rotulo);
+    }
+
+    // Área sensível ao mouse: a coluna inteira, maior que a barra
+    const alvo = svg("rect", { class: "alvo", x: centro - passo / 2, y: margem.topo, width: passo, height: alturaUtil });
+
+    alvo.addEventListener("pointerenter", () => {
+      dica.textContent = `${indice}h às ${indice + 1}h: ${hora.liberados} liberado(s), ${hora.negados} negado(s)`;
+      dica.style.display = "block";
+      // Posição em porcentagem, para acompanhar o tamanho real do SVG
+      dica.style.left = Math.min(85, Math.max(15, centro / L * 100)) + "%";
+      dica.style.top = (y(hora.liberados + hora.negados) / A * 100) + "%";
+    });
+    alvo.addEventListener("pointerleave", () => { dica.style.display = "none"; });
+
+    desenho.append(alvo);
+  });
+
+  area.append(desenho);
+}
+
+
+// ------------------------------------------------------------
+// TABELA
+// ------------------------------------------------------------
+
+function passaNoFiltro(evento, busca) {
+  if (filtroAcesso !== "todos" && evento.liberado !== filtroAcesso) return false;
+  if (!busca) return true;
+  return Object.values(evento).some((valor) => String(valor).toLowerCase().includes(busca));
+}
+
+function desenharTabela() {
+  const corpo = el("corpo-tabela");
+  const busca = el("busca").value.trim().toLowerCase();
+  const visiveis = eventos.filter((evento) => passaNoFiltro(evento, busca));
+
+  corpo.replaceChildren();
+
+  for (const evento of visiveis) {
+    const liberado = evento.liberado === "SIM";
+    const linha = criar("tr");
+    linha.tabIndex = 0;
+
+    const celulaFoto = criar("td");
+    if (evento.imagem) {
+      const miniatura = criar("img");
+      miniatura.src = "/imagens/" + encodeURIComponent(evento.imagem);
+      miniatura.alt = "";
+      miniatura.loading = "lazy";
+      celulaFoto.append(miniatura);
+    }
+
+    const celulaAcesso = criar("td");
+    celulaAcesso.append(criar("span", liberado ? "Liberado" : "Negado", "marcador " + (liberado ? "liberado" : "negado")));
+
+    linha.append(
+      celulaFoto,
+      criar("td", evento.timestamp, "numero"),
+      criar("td", evento.evento === "ENTRADA" ? "Entrada" : "Mudança"),
+      criar("td", evento.pessoa),
+      criar("td", evento.classe),
+      criar("td", evento.confianca_percentual + "%", "numero"),
+      celulaAcesso,
+    );
+
+    linha.addEventListener("click", () => abrirFoto(evento));
+    linha.addEventListener("keydown", (tecla) => { if (tecla.key === "Enter") abrirFoto(evento); });
+
+    corpo.append(linha);
+  }
+
+  el("tabela-vazia").hidden = visiveis.length > 0;
+  el("contagem-eventos").textContent = visiveis.length + " de " + eventos.length + " mais recentes";
+}
+
+function abrirFoto(evento) {
+  if (!evento.imagem) return;
+
+  const liberado = evento.liberado === "SIM";
+
+  el("foto-grande").src = "/imagens/" + encodeURIComponent(evento.imagem);
+
+  el("detalhes-foto").replaceChildren(
+    criar("span", liberado ? "Liberado" : "Negado", "marcador " + (liberado ? "liberado" : "negado")),
+    criar("strong", evento.timestamp),
+    criar("span", "Pessoa " + evento.pessoa),
+    criar("span", evento.classe + " (" + evento.confianca_percentual + "%)"),
+  );
+
+  el("janela-foto").showModal();
+}
+
+
+// ============================================================
+// FILTROS
+// ============================================================
+
+for (const botao of document.querySelectorAll(".filtros button")) {
+  botao.addEventListener("click", () => {
+    filtroAcesso = botao.dataset.filtro;
+    for (const outro of document.querySelectorAll(".filtros button")) {
+      outro.setAttribute("aria-pressed", String(outro === botao));
+    }
+    desenharTabela();
+  });
+}
+
+el("busca").addEventListener("input", desenharTabela);
+
+// Clicar fora da foto fecha a janela
+el("janela-foto").addEventListener("click", (evento) => {
+  if (evento.target === el("janela-foto")) el("janela-foto").close();
+});
+
+
+// ============================================================
+// INÍCIO: busca os dados agora e depois em intervalos fixos
+// ============================================================
+
+atualizarAoVivo();
+atualizarHistorico();
+
+setInterval(atualizarAoVivo, INTERVALO_AO_VIVO_MS);
+setInterval(atualizarHistorico, INTERVALO_HISTORICO_MS);
+</script>
+
+</body>
+</html>
