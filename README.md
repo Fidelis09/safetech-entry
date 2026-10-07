@@ -2,7 +2,7 @@
 
 Catraca inteligente com reconhecimento de EPI por visão computacional.
 
-O programa usa a webcam para verificar se cada pessoa na frente da câmera está usando os equipamentos de proteção obrigatórios (capacete, colete e óculos). O acesso só é liberado quando todas as pessoas na imagem estão com EPI. Cada decisão fica registrada em um log de auditoria, com foto de evidência.
+O programa usa a webcam para verificar, **equipamento por equipamento** (capacete, óculos, colete e luvas), o que cada pessoa na frente da câmera está usando. Você escolhe o setor que está sendo fiscalizado e o sistema cobra apenas os EPIs exigidos nele: num setor que só exige luvas, quem está de luvas passa. O acesso só é liberado quando todas as pessoas na imagem estão em conformidade, e cada decisão fica registrada em um log de auditoria, com foto de evidência.
 
 Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas a parte de visão computacional; a confirmação por voz da Ordem de Serviço fica para uma etapa futura.
 
@@ -28,12 +28,14 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 ## Funcionalidades
 
 - **Vídeo ao vivo** da webcam, fluido e ajustado ao tamanho da janela.
-- **Várias pessoas ao mesmo tempo** (fila): cada uma recebe uma caixa que a acompanha, com número, classe e confiança.
+- **EPIs reconhecidos separadamente**: o modelo dá uma resposta independente para cada equipamento.
+- **Fiscalização por setor**: perfis prontos (cada setor com seus EPIs obrigatórios) e caixas de seleção para ajustar na hora. A última seleção é lembrada ao reabrir o programa.
+- **Várias pessoas ao mesmo tempo** (fila): cada uma recebe uma caixa que a acompanha, com número e o que está faltando.
 - **Decisão estável**: usa a média das últimas classificações de cada pessoa, então o status não fica piscando.
 - **Status do acesso** em destaque: liberado (verde), negado (vermelho), analisando (laranja) ou aguardando.
-- **Limiar de confiança e intervalo de análise** ajustáveis na tela, com efeito imediato.
-- **Auditoria na mesma tela**: indicadores, filtros, busca, ordenação por coluna e foto de evidência do evento selecionado.
-- **Coleta de dataset** por botão ou atalho de teclado, direto na pasta de treino.
+- **Confiança mínima e intervalo de análise** ajustáveis na tela, com efeito imediato.
+- **Auditoria na mesma tela**: indicadores, filtros, busca, ordenação por coluna e foto de evidência do evento selecionado. Cada evento guarda o setor, o que era exigido e o que faltava.
+- **Coleta de dataset rotulada**: marque o que a pessoa está usando e salve, por botão ou atalho de teclado.
 - **Painel web do gerente**, somente leitura: status ao vivo, indicadores, gráfico e fotos pelo navegador, inclusive no celular.
 - **Abertura imediata**: a janela aparece na hora e o modelo de IA carrega em segundo plano.
 
@@ -55,13 +57,15 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
    pip install -r requirements.txt
    ```
 
-2. Confira se a pasta `modelos/` tem estes três arquivos:
+2. Confira a pasta `modelos/`:
 
-   | Arquivo | Origem |
-   |---|---|
-   | `modelo_epi.keras` | gerado pelo `treinar.py` |
-   | `classes.json` | gerado pelo `treinar.py` |
-   | `face_detection_yunet_2023mar.onnx` | detector de rosto, baixado uma vez |
+   | Arquivo | Para que serve | Origem |
+   |---|---|---|
+   | `face_detection_yunet_2023mar.onnx` | Localiza as pessoas | Baixado uma vez (já vem no repositório) |
+   | `modelo_epis.keras` e `epis.json` | Modelo **por EPI** | Gerados pelo `treinar.py`, depois de você coletar imagens rotuladas |
+   | `modelo_epi.keras` e `classes.json` | Modelo **antigo** (só "com EPI" / "sem EPI") | Já vêm no repositório |
+
+   > **Importante:** o repositório vem só com o modelo antigo. Com ele o programa funciona, mas **não distingue os equipamentos** nem aplica a seleção por setor (a área de fiscalização fica desativada, com um aviso). Para ativar a fiscalização por EPI, siga [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino). Depois de treinado, o modelo por EPI passa a ser usado automaticamente.
 
    Se o detector de rosto estiver faltando, baixe com (PowerShell, na pasta do projeto):
 
@@ -69,7 +73,7 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
    Invoke-WebRequest -Uri "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx" -OutFile "modelos/face_detection_yunet_2023mar.onnx"
    ```
 
-3. Se ainda não houver modelo treinado, rode o treino (veja [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino)).
+3. Para usar a fiscalização por EPI, colete imagens e treine (veja [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino)).
 
 ---
 
@@ -87,12 +91,32 @@ A janela abre na hora, com a mensagem "Carregando o modelo de IA". Quando o bot�
 
 | Área | O que faz |
 |---|---|
-| **Vídeo** | Imagem da webcam com uma caixa por pessoa. Verde = com EPI, vermelho = sem EPI, cinza = ainda analisando. |
-| **Faixa de status** | Decisão geral da catraca e quantas pessoas estão com e sem EPI. |
-| **Limiar de confiança** | Confiança mínima para liberar. Mais alto = mais rigoroso. |
+| **Vídeo** | Imagem da webcam com uma caixa por pessoa. Verde = em conformidade (`#1 OK`), vermelho = falta algo (`#2 FALTA: CAPACETE, LUVAS`), cinza = ainda analisando. |
+| **Faixa de status** | Decisão geral da catraca, quem está sem o quê e o que o setor exige. |
+| **Fiscalização** | O setor em fiscalização e os EPIs obrigatórios nele (veja abaixo). |
+| **Confiança mínima** | Confiança necessária para considerar que a pessoa está usando um EPI. Mais alto = mais rigoroso. |
 | **Intervalo de análise** | De quanto em quanto tempo cada pessoa é reclassificada. |
-| **Coleta de imagens** | Salva o recorte de cada pessoa na pasta de treino da classe. O número entre parênteses é o total de imagens da classe. |
-| **Auditoria** | Indicadores, filtros e tabela de eventos, atualizados ao vivo. Clique em um evento para ver a foto; duplo clique abre em tamanho real. Clique no título de uma coluna para ordenar. |
+| **Coleta de imagens** | Salva o recorte de cada pessoa, com os rótulos marcados, para treinar o modelo. |
+| **Auditoria** | Indicadores, filtros e tabela de eventos, atualizados ao vivo. Clique em um evento para ver a foto, o que era exigido e a confiança de cada EPI; duplo clique abre a foto em tamanho real. Clique no título de uma coluna para ordenar. |
+
+### Fiscalização por setor
+
+Cada setor da empresa pode exigir EPIs diferentes. Na área **Fiscalização**:
+
+1. Escolha o **setor** na lista. Os EPIs obrigatórios dele são marcados de uma vez.
+2. Se precisar, **marque ou desmarque** cada EPI à mão. Se a combinação não corresponder a nenhum setor pronto, o setor aparece como "Personalizado".
+
+A mudança vale na hora, sem reiniciar nada. O sistema continua enxergando todos os equipamentos; a seleção define apenas **quais deles contam** para liberar ou negar. A última seleção fica salva e é restaurada quando o programa é aberto de novo.
+
+Os setores prontos ficam em `safetech/config.py`, no dicionário `SETORES`. Para criar o seu, acrescente uma linha:
+
+```python
+SETORES = {
+    "Acesso geral": ["capacete", "oculos", "colete", "luvas"],
+    "Manuseio de materiais": ["luvas"],
+    "Almoxarifado": ["colete", "luvas"],   # setor novo
+}
+```
 
 O divisor entre os dois painéis pode ser arrastado para dar mais espaço ao vídeo ou à auditoria.
 
@@ -101,7 +125,7 @@ O divisor entre os dois painéis pode ser arrastado para dar mais espaço ao ví
 | Tecla | Ação |
 |---|---|
 | `Espaço` | Liga ou desliga a câmera |
-| `1`, `2`, ... | Salva uma imagem na 1ª, 2ª... classe |
+| `S` | Salva uma imagem com os rótulos marcados na área de coleta |
 | `Esc` | Limpa a busca da auditoria |
 
 Os atalhos ficam desativados enquanto você digita no campo de busca.
@@ -112,7 +136,7 @@ Os atalhos ficam desativados enquanto você digita no campo de busca.
 python reconhecer.py
 ```
 
-Abre uma janela para escolher a imagem e mostra, para cada pessoa encontrada, a classe, a confiança e se o acesso seria liberado. Também aceita o caminho direto: `python reconhecer.py foto.jpg`.
+Abre uma janela para escolher a imagem e mostra, para cada pessoa encontrada, a confiança de cada EPI e se ele conta como "usando". Também aceita o caminho direto: `python reconhecer.py foto.jpg`.
 
 ---
 
@@ -133,10 +157,12 @@ Na primeira vez, o Windows pode perguntar se o Python pode aceitar conexões da 
 
 | Área | Conteúdo |
 |---|---|
-| **Ao vivo** | Imagem atual da câmera com as caixas, status da catraca e a situação de cada pessoa. Atualiza a cada segundo. |
+| **Ao vivo** | Imagem atual da câmera com as caixas, o setor em fiscalização e o que ele exige, status da catraca e o que falta para cada pessoa. Atualiza a cada segundo. |
 | **Hoje** | Eventos, liberados, negados e taxa de liberação do dia, com o total do histórico abaixo de cada número. |
 | **Eventos por hora** | Gráfico de barras do dia. Passar o mouse numa hora mostra os números. |
-| **Eventos de auditoria** | Os eventos mais recentes, com miniatura da foto, filtros e busca. Clicar numa linha abre a foto em tamanho grande. |
+| **Eventos de auditoria** | Os eventos mais recentes, com miniatura da foto, setor, EPIs exigidos e o que faltava, além de filtros e busca. Clicar numa linha abre a foto em tamanho grande. |
+
+O gerente **vê** qual setor está sendo fiscalizado, mas não consegue mudá-lo: a escolha do setor é feita só no aplicativo.
 
 A página funciona em celular e não depende de internet (não carrega nada de fora).
 
@@ -165,8 +191,27 @@ Para restringir o painel a este computador, use `PAINEL_WEB_HOST = "127.0.0.1"`.
 
 O sistema combina dois modelos, cada um com uma função:
 
-1. **Detector de rosto (YuNet)**: encontra ONDE estão as pessoas. A partir de cada rosto, o programa monta uma caixa maior cobrindo cabeça e tronco, que é onde ficam o capacete, os óculos e o colete.
-2. **Classificador de EPI (MobileNetV2)**: recebe o recorte de cada pessoa e responde `com_epi` ou `sem_epi`, com uma confiança. Foi treinado por *transfer learning*: a MobileNetV2 já vem treinada com milhões de imagens e só a camada final foi treinada com as fotos do projeto.
+1. **Detector de rosto (YuNet)**: encontra ONDE estão as pessoas. A partir de cada rosto, o programa monta uma caixa maior cobrindo cabeça, tronco e mãos, que é onde ficam o capacete, os óculos, o colete e as luvas.
+2. **Classificador de EPI (MobileNetV2)**: recebe o recorte de cada pessoa e devolve **uma probabilidade por equipamento**, cada uma independente das outras:
+
+   ```
+   capacete 0.97    óculos 0.12    colete 0.88    luvas 0.05
+   ```
+
+   Isso se chama classificação *multirrótulo*: em vez de escolher uma classe entre várias, a rede responde várias perguntas de sim ou não. Por isso a camada final usa a função *sigmoid* (cada saída vai de 0 a 1 sozinha) em vez de *softmax* (que obrigaria as saídas a somarem 1). O treino é por *transfer learning*: a MobileNetV2 já vem treinada com milhões de imagens e só a camada final é treinada com as fotos do projeto.
+
+### Detectar é diferente de exigir
+
+Esta é a ideia central da fiscalização por setor. O modelo **sempre avalia todos os EPIs** que conhece. Quais deles são obrigatórios é uma decisão separada, tomada depois, com base no setor escolhido:
+
+| A pessoa está usando | Setor exige | Resultado |
+|---|---|---|
+| Capacete, colete | Capacete, colete | Liberado |
+| Capacete, colete | Luvas | Negado (falta: luvas) |
+| Só luvas | Luvas | Liberado |
+| Nada | Nenhum EPI | Liberado |
+
+Como a classificação não depende do setor, trocar de setor tem efeito imediato: basta refazer a comparação, sem analisar a imagem de novo.
 
 ### A linha de análise
 
@@ -174,15 +219,15 @@ Para cada frame da câmera:
 
 ```
  frame ──> DETECTAR ──> RASTREAR ──> CLASSIFICAR ──> DECIDIR ──> AUDITAR
-           onde estão    quem é      com EPI ou      liberado    grava se a
-           as pessoas    quem        sem EPI?        ou negado   decisão mudou
+           onde estão    quem é      quais EPIs      compara com  grava se a
+           as pessoas    quem        cada um usa?    o setor      decisão mudou
 ```
 
 - **Detectar**: o YuNet roda numa cópia reduzida do frame (mais rápido).
 - **Rastrear**: cada caixa é ligada à pessoa do frame anterior pela sobreposição entre as caixas (IoU). Assim cada pessoa mantém um número fixo (`#1`, `#2`...) e um histórico próprio, mesmo com várias pessoas em fila.
 - **Classificar**: todas as pessoas são classificadas numa única chamada ao modelo. Isso acontece no intervalo configurado, e mais rápido quando aparece alguém novo.
-- **Decidir**: a decisão de cada pessoa usa a **média** das últimas 5 classificações. A pessoa é liberada se a classe for `com_epi` e a confiança média passar do limiar.
-- **Auditar**: um evento é gravado quando sai a primeira decisão de uma pessoa e sempre que essa decisão muda.
+- **Decidir**: para cada EPI, usa a **média** das últimas 5 classificações. O EPI conta como "usando" se a média passar da confiança mínima. A pessoa é liberada se estiver usando todos os EPIs exigidos no setor.
+- **Auditar**: um evento é gravado quando sai a primeira decisão de uma pessoa e sempre que essa decisão muda (inclusive por troca de setor).
 
 ### Regra da catraca
 
@@ -190,8 +235,10 @@ Para cada frame da câmera:
 |---|---|
 | Ninguém na imagem | Aguardando |
 | Alguém ainda sem decisão | Analisando |
-| Pelo menos uma pessoa sem EPI | **Acesso negado** |
-| Todas as pessoas com EPI | **Acesso liberado** |
+| Pelo menos uma pessoa sem algum EPI exigido | **Acesso negado** |
+| Todas as pessoas com os EPIs exigidos | **Acesso liberado** |
+
+Um EPI exigido que o modelo não sabe reconhecer conta como faltando: na dúvida, o sistema nega.
 
 ### Por que a tela não trava
 
@@ -223,22 +270,23 @@ Tech_day_26.2/
 │   │
 │   ├── nucleo/             A "inteligência" (sem tela e sem câmera)
 │   │   ├── tipos.py            Estruturas de dados trocadas entre os módulos
-│   │   ├── classes.py          Leitura do classes.json
+│   │   ├── epis.py             Quais EPIs o modelo instalado reconhece
 │   │   ├── detector.py         Encontra as pessoas no frame (YuNet)
 │   │   ├── rastreador.py       Mantém a identidade de cada pessoa
-│   │   ├── classificador.py    Modelo de EPI (MobileNetV2)
-│   │   ├── decisao.py          Regras de liberado / negado
+│   │   ├── classificador.py    Modelo de EPI: uma probabilidade por equipamento
+│   │   ├── decisao.py          Compara o que a pessoa usa com o que o setor exige
 │   │   └── anotacao.py         Desenha caixas e rótulos na imagem
 │   │
 │   ├── servicos/           O que acontece ao redor do núcleo
 │   │   ├── camera.py           Captura da webcam em thread própria
 │   │   ├── analisador.py       Linha de análise em thread própria
 │   │   ├── auditoria.py        Log em CSV e fotos de evidência
-│   │   └── dataset.py          Salva imagens de treino
+│   │   ├── dataset.py          Salva imagens de treino com os rótulos
+│   │   └── preferencias.py     Lembra o setor e os EPIs selecionados
 │   │
 │   ├── interface/          A janela (Tkinter)
 │   │   ├── tema.py                  Cores, fontes e estilos
-│   │   ├── painel_monitoramento.py  Vídeo, status, controles e coleta
+│   │   ├── painel_monitoramento.py  Vídeo, status, fiscalização, ajustes e coleta
 │   │   ├── painel_auditoria.py      Indicadores, filtros, tabela e evidência
 │   │   └── janela_principal.py      Monta a tela e liga tudo
 │   │
@@ -250,9 +298,10 @@ Tech_day_26.2/
 │       └── treinador.py        Valida o dataset, monta a rede, treina e salva
 │
 ├── modelos/                Modelos usados pelo programa
-├── dataset/                Imagens de treino, uma pasta por classe
-│   ├── com_epi/
-│   └── sem_epi/
+├── dataset/                Dados de treino (não vão para o repositório)
+│   ├── epis/               Imagens coletadas pelo aplicativo
+│   └── rotulos.csv         Quais EPIs aparecem em cada imagem
+├── preferencias.json       Última seleção de setor (gerado pelo programa)
 └── auditoria/              Gerada pelo programa
     ├── log_auditoria.csv
     └── imagens/            Fotos de evidência
@@ -262,40 +311,64 @@ Tech_day_26.2/
 
 - **Camadas com direção única**: a interface usa os serviços, os serviços usam o núcleo. O núcleo não conhece ninguém acima dele, por isso pode ser testado sem câmera e sem janela.
 - **Configuração em um lugar só**: nenhum módulo tem número fixo espalhado; tudo vem de `safetech/config.py`.
-- **Classes vindas do arquivo**: os nomes e a ordem das classes são lidos de `classes.json`. O código só conhece o nome da classe que libera o acesso (`CLASSE_LIBERA_ACESSO`).
+- **EPIs vindos do arquivo**: quais EPIs o modelo reconhece, e em que ordem, é lido de `epis.json`, gravado junto com o modelo no treino. Assim o aplicativo nunca troca um equipamento por outro.
+- **Detectar separado de exigir**: o classificador não sabe nada de setores, e a regra de decisão não sabe nada de imagens.
 - **Painéis sem lógica**: os painéis apenas exibem dados e avisam a janela principal quando o usuário faz algo.
 
 ---
 
 ## Coleta de imagens e re-treino
 
-A qualidade do reconhecimento depende diretamente do dataset. Para melhorar o modelo:
+Para o modelo reconhecer cada equipamento separadamente, ele precisa de imagens **rotuladas item a item**: para cada foto, quais EPIs a pessoa está usando. O próprio aplicativo faz isso.
+
+### Passo a passo
 
 1. Abra o programa e ligue a câmera.
-2. Fique na frente da câmera **com** os EPIs e pressione `1` várias vezes, variando posição, distância, ângulo e iluminação.
-3. Faça o mesmo **sem** os EPIs (e com apenas parte deles), pressionando `2`.
-4. Feche o programa e treine de novo:
+2. Na área **Coleta de imagens**, marque o que a pessoa na câmera **está usando agora**. Por exemplo, se ela está só de capacete e luvas, marque `Capacete` e `Luvas`.
+3. Pressione `S` (ou clique em **Salvar imagem**) várias vezes, variando posição, distância, ângulo e iluminação.
+4. Troque os equipamentos, **atualize as caixas marcadas** e repita. O aviso no rodapé repete os rótulos de cada imagem salva: confira, porque um rótulo errado ensina o modelo errado.
+5. Feche o programa e treine:
 
    ```bash
    python treinar.py
    ```
 
-5. Abra o programa novamente para usar o modelo novo.
+6. Abra o programa novamente. O modelo por EPI passa a ser usado automaticamente e a área de fiscalização é ativada.
 
-Dicas:
+### Como montar um bom dataset
 
-- Mantenha as classes equilibradas (quantidade parecida de imagens em cada uma).
-- Inclua casos difíceis em `sem_epi`: só capacete, só colete, boné no lugar do capacete, óculos de grau.
-- Colete com pessoas, fundos e iluminações diferentes.
+- **Cada EPI precisa dos dois casos**: imagens com a pessoa usando e imagens sem usar. O treino se recusa a começar se algum EPI tiver só um dos casos.
+- **Varie as combinações.** Se o capacete e o colete aparecem sempre juntos, o modelo não aprende a separá-los: ele aprende "capacete e colete" como uma coisa só. Colete também só capacete, só colete, só luvas, tudo junto e nada.
+- **As mãos precisam aparecer** nas imagens com luvas (e nas sem luvas também). Mãos fora da imagem não ensinam nada sobre luvas.
+- **Inclua casos que confundem**: boné no lugar do capacete, óculos de grau no lugar dos óculos de proteção, camiseta de cor forte no lugar do colete.
+- **Varie pessoas, fundos e iluminação.**
+- **Quantidade**: o treino exige pelo menos 20 imagens e avisa quando um EPI tem menos de 10 exemplos de cada caso. Para um resultado confiável, pense em 100 ou mais imagens de cada caso por EPI.
+- Colete com **uma pessoa por vez**: todas as pessoas da imagem recebem os mesmos rótulos.
 
-> **Importante:** a coleta salva o **recorte de cada pessoa** (cabeça e tronco), que é exatamente o que o modelo recebe durante o uso. As imagens coletadas por versões anteriores do programa eram o frame inteiro. O modelo atual funciona com os recortes, mas a precisão melhora ao coletar imagens novas nesta versão e treinar de novo.
+O resumo ao lado do título da coleta mostra o total de imagens e em quantas delas cada EPI aparece em uso.
+
+### Onde os dados ficam
+
+| Arquivo | Conteúdo |
+|---|---|
+| `dataset/epis/` | As imagens: o **recorte de cada pessoa**, que é exatamente o que o modelo recebe durante o uso |
+| `dataset/rotulos.csv` | Uma linha por imagem: `arquivo, capacete, oculos, colete, luvas` (1 = usando, 0 = sem usar) |
+
+A planilha pode ser aberta e corrigida em qualquer editor de planilhas. Se uma imagem for apagada, a linha dela é ignorada no treino.
+
+Ao final, o treino mostra a **taxa de acerto de cada EPI** nas imagens de validação. É assim que se descobre qual equipamento precisa de mais imagens.
+
+### Mudar a lista de EPIs
+
+Os equipamentos fiscalizados ficam em `EPIS`, no `safetech/config.py`. O modelo aprende exatamente essa lista, então, ao acrescentar ou remover um EPI, é preciso **coletar as imagens de novo** (rotulando também o EPI novo) e treinar. A planilha antiga é renomeada, não apagada.
 
 ### Sobre o treinamento
 
 - Rede base: MobileNetV2 pré-treinada (ImageNet), congelada.
-- Camada treinada: média global, dropout de 20% e uma camada densa com softmax.
+- Camada treinada: média global, dropout de 20% e uma camada densa com uma saída *sigmoid* por EPI.
+- Função de perda: *binary crossentropy*, que trata cada saída como uma pergunta de sim ou não separada.
 - *Data augmentation*: espelhamento horizontal, rotação e zoom leves.
-- 80% das imagens para treino e 20% para validação; 10 épocas; otimizador Adam.
+- 80% das imagens para treino e 20% para validação; 15 épocas; otimizador Adam.
 - A normalização da MobileNetV2 fica dentro do modelo: quem usa o modelo entrega a imagem RGB 224x224 sem normalizar.
 
 ---
@@ -309,8 +382,10 @@ O log fica em `auditoria/log_auditoria.csv`, e as fotos em `auditoria/imagens/`.
 | `timestamp` | Data e hora do evento |
 | `evento` | `ENTRADA` (primeira decisão da pessoa) ou `MUDANCA` (a decisão mudou) |
 | `pessoa` | Identificação da pessoa na sessão, ex.: `P003` |
-| `classe` | Classe prevista, ex.: `com_epi` |
-| `confianca_percentual` | Confiança média da decisão |
+| `setor` | Setor que estava sendo fiscalizado |
+| `exigidos` | EPIs obrigatórios naquele setor, ex.: `Capacete, Luvas` |
+| `faltando` | EPIs exigidos que a pessoa não estava usando (vazio se nenhum) |
+| `confiancas` | Confiança de cada EPI, ex.: `Capacete 97%, Luvas 12%` |
 | `liberado` | `SIM` ou `NAO` |
 | `imagem` | Arquivo da foto de evidência |
 
@@ -328,8 +403,10 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 
 | Constante | Padrão | Efeito |
 |---|---|---|
-| `CLASSE_LIBERA_ACESSO` | `"com_epi"` | Nome da classe que libera o acesso |
-| `LIMIAR_CONFIANCA_PADRAO` | `0.80` | Confiança mínima para liberar (valor inicial do controle) |
+| `EPIS` | capacete, óculos, colete, luvas | Equipamentos fiscalizados. Mudar exige coletar e treinar de novo |
+| `SETORES` | 5 setores de exemplo | Perfis prontos: nome do setor e os EPIs obrigatórios nele |
+| `SETOR_PADRAO` | `"Acesso geral"` | Setor selecionado na primeira vez que o programa abre |
+| `LIMIAR_CONFIANCA_PADRAO` | `0.80` | Confiança mínima para considerar que a pessoa usa um EPI (valor inicial do controle) |
 | `INTERVALO_CLASSIFICACAO_PADRAO_SEG` | `1.0` | Intervalo de reclassificação (valor inicial do controle) |
 | `TAMANHO_HISTORICO_DECISAO` | `5` | Quantas classificações entram na média da decisão |
 | `AMOSTRAS_MINIMAS_DECISAO` | `2` | Classificações necessárias antes da primeira decisão |
@@ -337,9 +414,9 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `LARGURA_CAPTURA` / `ALTURA_CAPTURA` | `640` / `480` | Resolução pedida à webcam |
 | `LARGURA_DETECCAO` | `480` | Largura da cópia usada na detecção de rosto |
 | `CONFIANCA_MINIMA_ROSTO` | `0.7` | Confiança mínima para aceitar um rosto |
-| `MARGEM_*_ROSTO` | - | Quanto a caixa do rosto é expandida para cobrir o tronco |
+| `MARGEM_*_ROSTO` | - | Quanto a caixa do rosto é expandida para cobrir tronco e mãos |
 | `TEMPO_MAXIMO_AUSENTE_SEG` | `1.0` | Tempo que uma pessoa pode sumir sem perder o número |
-| `EPOCAS_TREINO` | `10` | Épocas do treinamento |
+| `EPOCAS_TREINO` | `15` | Épocas do treinamento |
 | `PAINEL_WEB_ATIVO` | `True` | Liga ou desliga o painel web |
 | `PAINEL_WEB_HOST` | `"0.0.0.0"` | `"0.0.0.0"` = acessível na rede; `"127.0.0.1"` = só neste computador |
 | `PAINEL_WEB_PORTA` | `8080` | Porta do painel web |
@@ -375,7 +452,11 @@ O tempo de abertura do modelo depende do TensorFlow: alguns segundos normalmente
 
 | Problema | Solução |
 |---|---|
-| **"Modelo não encontrado em 'modelos/'"** | Rode `python treinar.py`. |
+| **"Nenhum modelo encontrado em 'modelos/'"** | Recupere os arquivos de `modelos/` do repositório, ou colete imagens e rode `python treinar.py`. |
+| **A área de fiscalização está cinza** | O programa está usando o modelo antigo, que não distingue os EPIs. Colete imagens rotuladas e rode `python treinar.py`. |
+| **Um EPI específico erra muito** | Veja a taxa de acerto dele no fim do treino e colete mais imagens desse EPI, nos dois casos (usando e sem usar) e em combinações variadas. |
+| **O treino diz que falta um caso** | Algum EPI só tem imagens "usando" ou só "sem usar". Colete o caso que falta. |
+| **Luvas nunca são reconhecidas** | As mãos precisam aparecer dentro da caixa da pessoa. Afaste-se um pouco da câmera ou aumente `MARGEM_INFERIOR_ROSTO`. |
 | **"Não foi possível acessar a webcam"** | Feche outros programas que usem a câmera (Teams, Zoom, navegador). Se houver mais de uma câmera, mude `INDICE_CAMERA`. |
 | **Aviso "Detector de rosto não encontrado"** | Baixe o arquivo `.onnx` (veja [Instalação](#instalação)). Sem ele o programa funciona, mas trata a cena inteira como uma pessoa. |
 | **Vídeo lento** | Mantenha `LARGURA_CAPTURA`/`ALTURA_CAPTURA` em 640x480 e aumente o intervalo de análise na tela. |
@@ -393,14 +474,18 @@ O tempo de abertura do modelo depende do TensorFlow: alguns segundos normalmente
 Limitações conhecidas:
 
 - **A pessoa é localizada pelo rosto.** De costas ou com o rosto muito coberto, ela pode não ser detectada.
-- **O modelo responde apenas "com EPI" ou "sem EPI".** Ele não informa qual equipamento está faltando.
-- **Dataset pequeno.** Com poucas dezenas de imagens por classe, o modelo pode errar em pessoas, fundos e iluminações que não viu no treino.
+- **O modelo por EPI precisa ser treinado por você.** O repositório traz só o modelo antigo; a fiscalização por equipamento depende de coletar imagens rotuladas e treinar.
+- **O modelo olha o recorte inteiro da pessoa, reduzido para 224x224.** Itens pequenos, como óculos e luvas, são os mais difíceis e os que mais dependem de um dataset grande e variado.
+- **As mãos precisam estar visíveis** para as luvas serem avaliadas. Mãos fora da imagem ou atrás do corpo contam como "sem luvas".
+- **Pessoas muito próximas** podem ter as caixas sobrepostas, e o equipamento de uma influenciar o resultado da outra.
+- **O número de imagens necessárias é alto.** Com poucas dezenas de imagens, o modelo erra em pessoas, fundos e iluminações que não viu no treino.
 - **O número da pessoa não é identidade.** Quem sai da imagem e volta recebe um número novo.
 
 Próximos passos possíveis:
 
 - Confirmação por voz da Ordem de Serviço (etapa futura do desafio).
-- Um classificador por equipamento (capacete, colete, óculos), para dizer o que falta.
+- Um detector de objetos (que localiza cada equipamento na imagem), mais preciso para itens pequenos como óculos e luvas.
 - Detector de corpo inteiro, para não depender do rosto.
+- Edição dos setores pela própria tela, sem mexer no `config.py`.
 - Integração com uma catraca real (acionamento por relé ou porta serial).
 - Exportação de relatórios da auditoria por período.
