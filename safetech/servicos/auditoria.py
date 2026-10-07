@@ -11,6 +11,10 @@ O log registra EVENTOS, não cada análise da IA:
 
 Assim o histórico fica legível (uma linha por acontecimento relevante)
 e cada linha tem a foto do momento exato da decisão.
+
+Cada linha guarda também o SETOR fiscalizado, os EPIs que ele exigia e
+quais deles estavam faltando: dá para saber não só que o acesso foi
+negado, mas por quê.
 """
 
 import csv
@@ -20,6 +24,7 @@ from datetime import datetime
 import cv2
 
 from safetech import config
+from safetech.nucleo.epis import nome_do_epi, nomes_dos_epis
 from safetech.nucleo.tipos import RegistroAuditoria
 
 
@@ -27,8 +32,10 @@ COLUNAS = [
     "timestamp",
     "evento",
     "pessoa",
-    "classe",
-    "confianca_percentual",
+    "setor",
+    "exigidos",
+    "faltando",
+    "confiancas",
     "liberado",
     "imagem",
 ]
@@ -102,12 +109,19 @@ class ServicoAuditoria:
         self,
         evento,
         identificador_pessoa,
-        classe,
-        confianca,
+        setor,
+        exigidos,
+        itens,
+        faltando,
         liberado,
         imagem_bgr=None,
     ) -> RegistroAuditoria:
-        """Grava um evento no CSV (e a foto de evidência, se houver)."""
+        """
+        Grava um evento no CSV (e a foto de evidência, se houver).
+
+        exigidos / faltando -> chaves dos EPIs, ex.: ("capacete", "luvas")
+        itens               -> ResultadoEPI de cada EPI avaliado
+        """
 
         agora = datetime.now()
 
@@ -126,8 +140,14 @@ class ServicoAuditoria:
             timestamp=agora.strftime("%Y-%m-%d %H:%M:%S"),
             evento=evento,
             pessoa=f"P{identificador_pessoa:03d}",
-            classe=classe,
-            confianca_percentual=f"{confianca * 100:.2f}",
+            setor=setor,
+            # No CSV vão os nomes legíveis, não as chaves internas
+            exigidos=nomes_dos_epis(exigidos),
+            faltando=nomes_dos_epis(faltando),
+            confiancas=", ".join(
+                f"{nome_do_epi(item.chave)} {item.confianca * 100:.0f}%"
+                for item in itens
+            ),
             liberado="SIM" if liberado else "NAO",
             imagem=nome_imagem,
         )

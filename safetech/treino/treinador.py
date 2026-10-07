@@ -1,131 +1,178 @@
 """
-Treinamento do reconhecedor de EPI.
+Treinamento do reconhecedor de EPI (modelo por equipamento).
 
 Técnica: TRANSFER LEARNING. Em vez de treinar uma rede do zero (o que
 exigiria milhares de imagens), usamos a MobileNetV2, que já aprendeu a
 "enxergar" com milhões de fotos, e treinamos apenas uma pequena camada
-final que aprende a diferença entre as nossas classes.
+final.
+
+Diferença em relação a um classificador comum: aqui a resposta não é
+"uma classe entre várias", e sim VÁRIAS respostas independentes de sim
+ou não, uma por equipamento (classificação multirrótulo):
+
+    capacete? 0.97    óculos? 0.12    colete? 0.88    luvas? 0.05
+
+Por isso a camada final usa a função SIGMOID (cada saída vai de 0 a 1
+sozinha, sem depender das outras) em vez de softmax.
 
 Etapas:
 
-    1) validar o dataset (pastas e quantidade de imagens);
-    2) carregar as imagens, separando treino e validação;
-    3) montar a rede (MobileNetV2 congelada + camada de classificação);
+    1) ler e validar o dataset rotulado;
+    2) separar treino e validação;
+    3) montar a rede (MobileNetV2 congelada + camada de saída);
     4) treinar;
-    5) avaliar na validação;
-    6) salvar o modelo e a lista de classes.
+    5) avaliar, mostrando a acurácia de cada EPI;
+    6) salvar o modelo e a lista de EPIs.
 """
 
 import json
 
+import numpy as np
 import tensorflow as tf
 
 from safetech import config
+from safetech.nucleo.epis import nome_do_epi
+from safetech.servicos.dataset import ColetorDataset
 
 
 # ============================================================
-# 1) VALIDAÇÃO DO DATASET
+# 1) LEITURA E VALIDAÇÃO DO DATASET
 # ============================================================
 
-def contar_imagens_por_classe(pasta_dataset):
-    """Devolve {nome_da_classe: quantidade_de_imagens}, uma entrada por subpasta."""
-
-    contagem = {}
-
-    for pasta in sorted(pasta_dataset.iterdir()):
-
-        if not pasta.is_dir():
-            continue
-
-        contagem[pasta.name] = sum(
-            1
-            for arquivo in pasta.iterdir()
-            if arquivo.is_file() and arquivo.suffix.lower() in config.EXTENSOES_IMAGEM
-        )
-
-    return contagem
-
-
-def validar_dataset(pasta_dataset):
+def ler_dataset(coletor=None):
     """
-    Confere se dá para treinar. Devolve a contagem por classe ou
-    interrompe o programa com uma explicação do que está faltando.
+    Lê a planilha de rótulos.
+
+    Devolve (caminhos, rotulos):
+        caminhos -> lista com o caminho de cada imagem
+        rotulos  -> matriz [imagem, epi] de 0 e 1, colunas na ordem de config.EPIS
     """
 
-    if not pasta_dataset.exists():
+    coletor = coletor or ColetorDataset()
+
+    exemplos = coletor.ler_rotulos()
+
+    caminhos = [str(caminho) for caminho, _ in exemplos]
+
+    rotulos = np.array(
+        [rotulos for _, rotulos in exemplos],
+        dtype=np.float32,
+    ).reshape(len(exemplos), len(config.EPIS))
+
+    return caminhos, rotulos
+
+
+def validar_dataset(rotulos):
+    """
+    Confere se dá para treinar.
+
+    Interrompe o programa se faltar o essencial e devolve uma lista de
+    avisos (problemas que não impedem o treino, mas pioram o resultado).
+    """
+
+    total = len(rotulos)
+
+    if total < config.MINIMO_IMAGENS_TREINO:
 
         raise SystemExit(
-            "ERRO: a pasta 'dataset' não foi encontrada.\n\n"
-            "Crie esta estrutura:\n\n"
-            "dataset\n"
-            "  com_epi\n"
-            "  sem_epi"
+            f"ERRO: há {total} imagens rotuladas, e o mínimo para treinar é "
+            f"{config.MINIMO_IMAGENS_TREINO}.\n\n"
+            "Abra o aplicativo (python app.py), ligue a câmera e use a área\n"
+            "'Coleta de imagens': marque o que a pessoa está usando e salve."
         )
 
-    contagem = contar_imagens_por_classe(pasta_dataset)
+    avisos = []
 
-    if len(contagem) < 2:
+    for posicao, chave in enumerate(config.EPIS):
 
-        raise SystemExit(
-            "ERRO: é necessário ter pelo menos DUAS classes "
-            "(duas subpastas dentro de 'dataset').\n"
-            f"Classes encontradas: {list(contagem)}"
-        )
+        usando = int(rotulos[:, posicao].sum())
+        sem_usar = total - usando
 
-    classes_vazias = [nome for nome, quantidade in contagem.items() if quantidade == 0]
+        # O modelo só aprende um equipamento se vir os DOIS casos:
+        # gente usando e gente sem usar.
+        if usando == 0 or sem_usar == 0:
 
-    if classes_vazias:
+            caso = "usando" if usando == 0 else "sem usar"
 
-        raise SystemExit(
-            f"ERRO: estas classes não têm imagens válidas: {classes_vazias}\n"
-            f"Formatos aceitos: {' '.join(sorted(config.EXTENSOES_IMAGEM))}"
-        )
+            raise SystemExit(
+                f"ERRO: não há nenhuma imagem com a pessoa {caso} "
+                f"'{nome_do_epi(chave)}'.\n"
+                "O modelo precisa de exemplos dos dois casos para cada EPI."
+            )
 
-    return contagem
+        if min(usando, sem_usar) < config.MINIMO_EXEMPLOS_POR_CASO:
+
+            avisos.append(
+                f"{nome_do_epi(chave)}: {usando} usando e {sem_usar} sem usar. "
+                f"O ideal é pelo menos {config.MINIMO_EXEMPLOS_POR_CASO} de cada."
+            )
+
+    return avisos
 
 
 # ============================================================
-# 2) CARREGAMENTO DAS IMAGENS
+# 2) SEPARAÇÃO EM TREINO E VALIDAÇÃO
 # ============================================================
 
-def carregar_dataset(pasta_dataset):
+def _ler_imagem(caminho, rotulos):
+    """Abre uma imagem do disco e a deixa no tamanho que a rede espera."""
+
+    largura, altura = config.TAMANHO_IMAGEM
+
+    imagem = tf.io.decode_image(
+        tf.io.read_file(caminho),
+        channels=3,
+        expand_animations=False,
+    )
+
+    # resize devolve valores de 0 a 255 em ponto flutuante, que é
+    # exatamente o que o modelo recebe durante o uso.
+    imagem = tf.image.resize(imagem, (altura, largura))
+
+    return imagem, rotulos
+
+
+def separar_dataset(caminhos, rotulos):
     """
-    Lê as imagens e separa em treino e validação.
+    Embaralha e divide as imagens: a maior parte para treinar e uma
+    parte guardada para validar (imagens que a rede não vê no treino).
 
-    A mesma semente (seed) nas duas chamadas garante que nenhuma
-    imagem caia nos dois conjuntos ao mesmo tempo.
+    A semente fixa faz a divisão ser sempre a mesma.
     """
 
-    opcoes = dict(
-        validation_split=config.FRACAO_VALIDACAO,
-        seed=config.SEMENTE_TREINO,
-        image_size=config.TAMANHO_IMAGEM,
-        batch_size=config.LOTE_TREINO,
-    )
+    ordem = np.random.default_rng(config.SEMENTE_TREINO).permutation(len(caminhos))
 
-    treino = tf.keras.utils.image_dataset_from_directory(
-        pasta_dataset, subset="training", **opcoes
-    )
+    quantidade_validacao = max(1, int(len(caminhos) * config.FRACAO_VALIDACAO))
 
-    validacao = tf.keras.utils.image_dataset_from_directory(
-        pasta_dataset, subset="validation", **opcoes
-    )
+    indices_validacao = ordem[:quantidade_validacao]
+    indices_treino = ordem[quantidade_validacao:]
 
-    # Os nomes das classes vêm dos nomes das subpastas, em ordem alfabética
-    classes = treino.class_names
+    def montar(indices, embaralhar):
 
-    # prefetch: prepara o próximo lote enquanto a rede treina no atual
-    treino = treino.prefetch(buffer_size=tf.data.AUTOTUNE)
-    validacao = validacao.prefetch(buffer_size=tf.data.AUTOTUNE)
+        conjunto = tf.data.Dataset.from_tensor_slices(
+            ([caminhos[indice] for indice in indices], rotulos[indices])
+        )
 
-    return treino, validacao, classes
+        if embaralhar:
+            # Ordem diferente a cada época ajuda a rede a generalizar
+            conjunto = conjunto.shuffle(len(indices), seed=config.SEMENTE_TREINO)
+
+        return (
+            conjunto
+            .map(_ler_imagem, num_parallel_calls=tf.data.AUTOTUNE)
+            .batch(config.LOTE_TREINO)
+            # prefetch: prepara o próximo lote enquanto a rede treina no atual
+            .prefetch(tf.data.AUTOTUNE)
+        )
+
+    return montar(indices_treino, True), montar(indices_validacao, False)
 
 
 # ============================================================
 # 3) MONTAGEM DA REDE
 # ============================================================
 
-def construir_modelo(quantidade_classes):
+def construir_modelo(quantidade_epis):
 
     largura, altura = config.TAMANHO_IMAGEM
 
@@ -161,7 +208,7 @@ def construir_modelo(quantidade_classes):
     )
 
     # Congela a MobileNetV2: o conhecimento que ela já tem é preservado
-    # e só a camada de classificação é treinada.
+    # e só a camada de saída é treinada.
     modelo_base.trainable = False
 
     # ------------------------------------------------------
@@ -186,22 +233,48 @@ def construir_modelo(quantidade_classes):
     # Dropout: reduz o risco de a rede "decorar" as imagens de treino
     x = tf.keras.layers.Dropout(config.TAXA_DROPOUT)(x)
 
-    # Um neurônio por classe; softmax converte os valores em probabilidades
+    # Um neurônio por EPI. SIGMOID faz cada saída ser uma probabilidade
+    # independente: a pessoa pode estar com vários EPIs, com um ou com
+    # nenhum. (Softmax obrigaria as saídas a somarem 1, o que só serve
+    # quando existe uma única resposta certa.)
     saida = tf.keras.layers.Dense(
-        quantidade_classes,
-        activation="softmax",
-        name="classificacao",
+        quantidade_epis,
+        activation="sigmoid",
+        name="epis",
     )(x)
 
     modelo = tf.keras.Model(inputs=entrada, outputs=saida)
 
     modelo.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=config.TAXA_APRENDIZADO),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
+        # binary_crossentropy trata cada saída como uma pergunta de
+        # sim ou não separada, que é exatamente o nosso caso
+        loss="binary_crossentropy",
+        metrics=["binary_accuracy"],
     )
 
     return modelo
+
+
+# ============================================================
+# 5) AVALIAÇÃO POR EPI
+# ============================================================
+
+def acuracia_por_epi(modelo, validacao):
+    """
+    Devolve {chave: acurácia} na validação, um valor por EPI.
+
+    A acurácia geral pode esconder um EPI que a rede não aprendeu;
+    olhando um por um dá para saber qual precisa de mais imagens.
+    """
+
+    esperado = np.concatenate([rotulos.numpy() for _, rotulos in validacao])
+
+    previsto = modelo.predict(validacao, verbose=0) >= 0.5
+
+    acertos = (previsto == (esperado >= 0.5)).mean(axis=0)
+
+    return {chave: float(acertos[posicao]) for posicao, chave in enumerate(config.EPIS)}
 
 
 # ============================================================
@@ -211,9 +284,9 @@ def construir_modelo(quantidade_classes):
 def _titulo(texto):
 
     print()
-    print("=" * 52)
+    print("=" * 56)
     print(texto)
-    print("=" * 52)
+    print("=" * 56)
     print()
 
 
@@ -221,42 +294,40 @@ def executar():
 
     _titulo("TREINAMENTO DO RECONHECEDOR DE EPI (SafeTech)")
 
-    print("Dataset:", config.PASTA_DATASET)
+    print("Imagens: ", config.PASTA_IMAGENS_DATASET)
+    print("Rótulos: ", config.ARQUIVO_ROTULOS)
 
     # ------------------------------------------------------
-    # 1) VALIDAÇÃO
+    # 1) LEITURA E VALIDAÇÃO
     # ------------------------------------------------------
 
-    contagem = validar_dataset(config.PASTA_DATASET)
+    caminhos, rotulos = ler_dataset()
+
+    avisos = validar_dataset(rotulos)
 
     print()
-    print("Classes encontradas:")
-
-    for nome, quantidade in contagem.items():
-
-        print(f"  {nome}: {quantidade} imagens")
-
-        if quantidade < config.MINIMO_IMAGENS_RECOMENDADO:
-            print(
-                f"    ATENÇÃO: poucas imagens. Para um resultado melhor, coloque "
-                f"pelo menos {config.MINIMO_IMAGENS_RECOMENDADO}."
-            )
-
-    print(f"  Total: {sum(contagem.values())} imagens")
-
-    # ------------------------------------------------------
-    # 2) CARREGAMENTO
-    # ------------------------------------------------------
-
-    _titulo("CARREGANDO IMAGENS")
-
-    treino, validacao, classes = carregar_dataset(config.PASTA_DATASET)
-
+    print(f"Imagens rotuladas: {len(caminhos)}")
     print()
-    print("Classes que a IA vai aprender:")
 
-    for numero, classe in enumerate(classes):
-        print(f"  {numero} = {classe}")
+    for posicao, chave in enumerate(config.EPIS):
+
+        usando = int(rotulos[:, posicao].sum())
+
+        print(f"  {nome_do_epi(chave):<10} {usando:>4} usando   {len(caminhos) - usando:>4} sem usar")
+
+    if avisos:
+
+        print()
+        print("ATENÇÃO, poucos exemplos (o treino continua, mas pode errar mais):")
+
+        for aviso in avisos:
+            print("  -", aviso)
+
+    # ------------------------------------------------------
+    # 2) SEPARAÇÃO
+    # ------------------------------------------------------
+
+    treino, validacao = separar_dataset(caminhos, rotulos)
 
     # ------------------------------------------------------
     # 3) MODELO
@@ -267,7 +338,7 @@ def executar():
     print("Na primeira execução pode ser necessário baixar os pesos da rede.")
     print()
 
-    modelo = construir_modelo(len(classes))
+    modelo = construir_modelo(len(config.EPIS))
 
     modelo.summary()
 
@@ -283,11 +354,10 @@ def executar():
     # 5) AVALIAÇÃO
     # ------------------------------------------------------
 
-    _titulo("AVALIANDO")
+    _titulo("AVALIANDO (imagens que a rede não viu no treino)")
 
-    _, acuracia = modelo.evaluate(validacao, verbose=0)
-
-    print(f"Acurácia na validação: {acuracia * 100:.2f}%")
+    for chave, acuracia in acuracia_por_epi(modelo, validacao).items():
+        print(f"  {nome_do_epi(chave):<10} {acuracia * 100:6.2f}% de acerto")
 
     # ------------------------------------------------------
     # 6) SALVAMENTO
@@ -295,14 +365,16 @@ def executar():
 
     config.PASTA_MODELOS.mkdir(parents=True, exist_ok=True)
 
-    modelo.save(config.ARQUIVO_MODELO)
+    modelo.save(config.ARQUIVO_MODELO_EPIS)
 
-    with open(config.ARQUIVO_CLASSES, "w", encoding="utf-8") as arquivo:
-        json.dump(classes, arquivo, ensure_ascii=False, indent=4)
+    # A ordem das saídas do modelo é a ordem desta lista. O aplicativo
+    # lê daqui, e não do config.py, para nunca trocar um EPI por outro.
+    with open(config.ARQUIVO_EPIS, "w", encoding="utf-8") as arquivo:
+        json.dump(list(config.EPIS), arquivo, ensure_ascii=False, indent=4)
 
     _titulo("TREINAMENTO FINALIZADO")
 
-    print("Modelo salvo em: ", config.ARQUIVO_MODELO)
-    print("Classes salvas em:", config.ARQUIVO_CLASSES)
+    print("Modelo salvo em:", config.ARQUIVO_MODELO_EPIS)
+    print("EPIs salvos em: ", config.ARQUIVO_EPIS)
     print()
     print("Agora você pode abrir o programa com: python app.py")

@@ -5,8 +5,8 @@ Roda em uma thread própria e repete, para cada frame novo da câmera:
 
     1) DETECTAR   -> onde estão as pessoas (detector de rosto)
     2) RASTREAR   -> quem é quem em relação ao frame anterior
-    3) CLASSIFICAR-> cada pessoa está com EPI? (de tempos em tempos, em lote)
-    4) DECIDIR    -> liberado / negado por pessoa e para a catraca
+    3) CLASSIFICAR-> quais EPIs cada pessoa usa? (de tempos em tempos, em lote)
+    4) DECIDIR    -> compara com os EPIs exigidos no setor: liberado / negado
     5) AUDITAR    -> grava no log quando a decisão de alguém muda
     6) PUBLICAR   -> deixa o resultado pronto para a interface desenhar
 
@@ -30,9 +30,10 @@ from safetech.servicos import auditoria as modulo_auditoria
 # PARÂMETROS AJUSTÁVEIS EM TEMPO REAL
 # ============================================================
 #
-# A interface altera estes valores (sliders) e a thread de análise
-# os lê a cada ciclo. São números simples, então a troca entre
-# threads é segura sem precisar de trava.
+# A interface altera estes valores (controles da tela) e a thread de
+# análise os lê a cada ciclo. Cada valor é trocado inteiro de uma vez
+# (número, texto ou tupla), então a troca entre threads é segura sem
+# precisar de trava.
 # ============================================================
 
 @dataclass
@@ -40,6 +41,10 @@ class ParametrosAnalise:
 
     limiar_confianca: float = config.LIMIAR_CONFIANCA_PADRAO
     intervalo_classificacao: float = config.INTERVALO_CLASSIFICACAO_PADRAO_SEG
+
+    # Setor em fiscalização e as chaves dos EPIs obrigatórios nele
+    setor: str = config.SETOR_PADRAO
+    exigidos: tuple = tuple(config.SETORES[config.SETOR_PADRAO])
 
 
 class Analisador:
@@ -165,6 +170,12 @@ class Analisador:
 
             rastros = self._rastreador.atualizar(caixas, inicio_ciclo)
 
+            # O setor e os EPIs exigidos são lidos UMA vez por ciclo,
+            # para a decisão e a auditoria usarem exatamente os mesmos
+            # valores mesmo que o usuário mude a seleção no meio.
+            setor = self._parametros.setor
+            exigidos = self._exigidos()
+
             # ------------------------------------------------------
             # 3) CLASSIFICAR,  4) DECIDIR  e  5) AUDITAR
             # ------------------------------------------------------
@@ -172,7 +183,7 @@ class Analisador:
             if self._hora_de_classificar(rastros, inicio_ciclo):
 
                 self._classificar(frame, rastros)
-                self._auditar_mudancas(frame, rastros)
+                self._auditar_mudancas(frame, rastros, setor, exigidos)
 
                 self._ultima_classificacao = inicio_ciclo
 
@@ -188,7 +199,9 @@ class Analisador:
                 ciclos_no_periodo = 0
                 inicio_periodo = time.perf_counter()
 
-            self._publicar(self._montar_estado(rastros, analises_por_segundo))
+            self._publicar(
+                self._montar_estado(rastros, setor, exigidos, analises_por_segundo)
+            )
 
             # Não analisa mais rápido do que o necessário
             sobra = periodo_minimo - (time.perf_counter() - inicio_ciclo)
@@ -227,7 +240,13 @@ class Analisador:
         return desde_a_ultima >= self._parametros.intervalo_classificacao
 
     def _classificar(self, frame, rastros):
-        """Classifica todas as pessoas visíveis numa única chamada ao modelo."""
+        """
+        Classifica todas as pessoas visíveis numa única chamada ao modelo.
+
+        O modelo sempre avalia TODOS os EPIs que conhece; quais deles
+        são obrigatórios é decidido depois, na etapa de decisão. Por
+        isso trocar de setor tem efeito imediato, sem reclassificar.
+        """
 
         visiveis = [rastro for rastro in rastros if rastro.visivel]
 
@@ -248,35 +267,47 @@ class Analisador:
     # 4) DECISÃO
     # ============================================================
 
-    def _avaliar(self, rastro):
+    def _exigidos(self):
+        """EPIs obrigatórios agora, conforme o setor escolhido na tela."""
+
+        # O modelo antigo só conhece o "conjunto completo": nesse modo
+        # a seleção por equipamento não tem como ser aplicada.
+        if not self._classificador.por_epi:
+            return (config.EPI_CONJUNTO,)
+
+        return tuple(self._parametros.exigidos)
+
+    def _avaliar(self, rastro, exigidos):
 
         return decisao.avaliar_pessoa(
             rastro.historico,
-            self._classificador.classes,
+            self._classificador.epis,
+            exigidos,
             self._parametros.limiar_confianca,
         )
 
-    def _montar_estado(self, rastros, analises_por_segundo) -> EstadoCena:
+    def _observar(self, rastro, exigidos) -> PessoaObservada:
+        """Retrato imutável de uma pessoa, com a decisão do momento."""
 
-        pessoas = []
+        status, itens, faltando = self._avaliar(rastro, exigidos)
 
-        for rastro in rastros:
+        return PessoaObservada(
+            identificador=rastro.identificador,
+            caixa=rastro.caixa,
+            status=status,
+            itens=itens,
+            faltando=faltando,
+        )
 
-            status, classe, confianca = self._avaliar(rastro)
+    def _montar_estado(self, rastros, setor, exigidos, analises_por_segundo) -> EstadoCena:
 
-            pessoas.append(
-                PessoaObservada(
-                    identificador=rastro.identificador,
-                    caixa=rastro.caixa,
-                    status=status,
-                    classe=classe,
-                    confianca=confianca,
-                )
-            )
+        pessoas = tuple(self._observar(rastro, exigidos) for rastro in rastros)
 
         return EstadoCena(
-            pessoas=tuple(pessoas),
+            pessoas=pessoas,
             acesso=decisao.avaliar_acesso(pessoa.status for pessoa in pessoas),
+            setor=setor,
+            exigidos=exigidos,
             analises_por_segundo=analises_por_segundo,
         )
 
@@ -284,7 +315,7 @@ class Analisador:
     # 5) AUDITORIA
     # ============================================================
 
-    def _auditar_mudancas(self, frame, rastros):
+    def _auditar_mudancas(self, frame, rastros, setor, exigidos):
         """Grava um evento para cada pessoa cuja decisão mudou."""
 
         for rastro in rastros:
@@ -292,12 +323,12 @@ class Analisador:
             if not rastro.visivel:
                 continue
 
-            status, classe, confianca = self._avaliar(rastro)
+            pessoa = self._observar(rastro, exigidos)
 
-            if status is StatusPessoa.ANALISANDO:
+            if pessoa.status is StatusPessoa.ANALISANDO:
                 continue
 
-            liberado = status is StatusPessoa.LIBERADO
+            liberado = pessoa.status is StatusPessoa.LIBERADO
 
             if liberado == rastro.decisao_registrada:
                 continue
@@ -310,26 +341,17 @@ class Analisador:
             # Foto de evidência: o frame inteiro (contexto) com a
             # pessoa em questão destacada. É uma CÓPIA, porque o
             # frame original é compartilhado com a interface.
-            evidencia = anotacao.desenhar_pessoas(
-                frame.copy(),
-                [
-                    PessoaObservada(
-                        identificador=rastro.identificador,
-                        caixa=rastro.caixa,
-                        status=status,
-                        classe=classe,
-                        confianca=confianca,
-                    )
-                ],
-            )
+            evidencia = anotacao.desenhar_pessoas(frame.copy(), [pessoa])
 
             registro = self._auditoria.registrar(
-                evento,
-                rastro.identificador,
-                classe,
-                confianca,
-                liberado,
-                evidencia,
+                evento=evento,
+                identificador_pessoa=rastro.identificador,
+                setor=setor,
+                exigidos=exigidos,
+                itens=pessoa.itens,
+                faltando=pessoa.faltando,
+                liberado=liberado,
+                imagem_bgr=evidencia,
             )
 
             rastro.decisao_registrada = liberado
