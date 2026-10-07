@@ -22,8 +22,17 @@ RAIZ = Path(__file__).resolve().parent.parent
 
 # Modelos (gerados pelo treinar.py ou baixados)
 PASTA_MODELOS = RAIZ / "modelos"
-ARQUIVO_MODELO = PASTA_MODELOS / "modelo_epi.keras"
-ARQUIVO_CLASSES = PASTA_MODELOS / "classes.json"
+
+# Modelo POR EPI: uma resposta independente para cada equipamento.
+# epis.json guarda quais EPIs o modelo conhece, na ordem das saídas.
+ARQUIVO_MODELO_EPIS = PASTA_MODELOS / "modelo_epis.keras"
+ARQUIVO_EPIS = PASTA_MODELOS / "epis.json"
+
+# Modelo ANTIGO (só "com_epi" / "sem_epi" para o conjunto todo). É
+# usado apenas enquanto o modelo por EPI ainda não foi treinado.
+ARQUIVO_MODELO_LEGADO = PASTA_MODELOS / "modelo_epi.keras"
+ARQUIVO_CLASSES_LEGADO = PASTA_MODELOS / "classes.json"
+
 ARQUIVO_MODELO_ROSTO = PASTA_MODELOS / "face_detection_yunet_2023mar.onnx"
 
 # De onde baixar o detector de rosto, caso o arquivo esteja faltando
@@ -32,13 +41,59 @@ URL_MODELO_ROSTO = (
     "face_detection_yunet/face_detection_yunet_2023mar.onnx"
 )
 
-# Imagens de treino: uma subpasta por classe (dataset/com_epi, dataset/sem_epi)
+# Imagens de treino do modelo por EPI e a planilha de rótulos, que
+# diz, para cada imagem, quais equipamentos a pessoa está usando.
 PASTA_DATASET = RAIZ / "dataset"
+PASTA_IMAGENS_DATASET = PASTA_DATASET / "epis"
+ARQUIVO_ROTULOS = PASTA_DATASET / "rotulos.csv"
+
+# Última seleção de setor/EPIs feita na tela (lembrada entre execuções)
+ARQUIVO_PREFERENCIAS = RAIZ / "preferencias.json"
 
 # Log de auditoria (CSV) e fotos de evidência
 PASTA_AUDITORIA = RAIZ / "auditoria"
 ARQUIVO_LOG_AUDITORIA = PASTA_AUDITORIA / "log_auditoria.csv"
 PASTA_IMAGENS_AUDITORIA = PASTA_AUDITORIA / "imagens"
+
+
+# ============================================================
+# EQUIPAMENTOS (EPIs) E SETORES
+# ============================================================
+#
+# EPIS: os equipamentos que o sistema fiscaliza.
+#   chave -> nome mostrado na tela
+# A chave (sem acento e sem espaço) é usada nos arquivos e nos
+# rótulos desenhados no vídeo.
+#
+# ATENÇÃO: o modelo aprende exatamente esta lista. Se você acrescentar
+# ou remover um EPI, é preciso coletar imagens rotuladas de novo e
+# rodar o treinar.py.
+# ============================================================
+
+EPIS = {
+    "capacete": "Capacete",
+    "oculos": "Óculos",
+    "colete": "Colete",
+    "luvas": "Luvas",
+}
+
+# SETORES: perfis prontos de fiscalização.
+#   nome do setor -> EPIs obrigatórios nele
+# Escolher um setor na tela marca esses EPIs de uma vez; depois ainda
+# dá para ajustar marcando ou desmarcando cada um.
+SETORES = {
+    "Acesso geral": ["capacete", "oculos", "colete", "luvas"],
+    "Canteiro de obras": ["capacete", "colete"],
+    "Laboratório": ["oculos", "luvas"],
+    "Manuseio de materiais": ["luvas"],
+    "Área de circulação": ["colete"],
+}
+
+# Setor selecionado na primeira vez que o programa abre
+SETOR_PADRAO = "Acesso geral"
+
+# Nome mostrado quando os EPIs marcados não batem com nenhum setor
+SETOR_PERSONALIZADO = "Personalizado"
 
 
 # ============================================================
@@ -48,9 +103,15 @@ PASTA_IMAGENS_AUDITORIA = PASTA_AUDITORIA / "imagens"
 # Tamanho de entrada da MobileNetV2 (largura, altura)
 TAMANHO_IMAGEM = (224, 224)
 
-# Nome da classe (em classes.json) que libera o acesso. A inferência
-# nunca depende da ORDEM das classes: ela lê a lista do arquivo e
-# compara o NOME previsto com esta constante.
+# --- Modo de compatibilidade (modelo antigo) ------------------
+#
+# O modelo antigo não distingue os equipamentos: ele só sabe dizer se
+# a pessoa está com o conjunto completo. Nesse modo o sistema trabalha
+# com um único "EPI" fictício, representado pela chave abaixo.
+EPI_CONJUNTO = "conjunto"
+NOME_EPI_CONJUNTO = "EPI completo"
+
+# Classe do modelo antigo (em classes.json) que significa "com EPI"
 CLASSE_LIBERA_ACESSO = "com_epi"
 
 
@@ -83,12 +144,14 @@ LARGURA_DETECCAO = 480
 # Confiança mínima (0 a 1) para aceitar um rosto detectado
 CONFIANCA_MINIMA_ROSTO = 0.7
 
-# A caixa do rosto é expandida para cobrir cabeça e tronco, que é
-# onde ficam o capacete, os óculos e o colete. Os valores são
-# múltiplos do tamanho do rosto.
-MARGEM_LATERAL_ROSTO = 0.9
+# A caixa do rosto é expandida para cobrir cabeça, tronco e mãos: é
+# onde ficam o capacete, os óculos, o colete e as luvas. Os valores
+# são múltiplos do tamanho do rosto. A caixa é larga e comprida de
+# propósito, para as mãos aparecerem (sem elas não há como ver luvas).
+# Largura maior que esta faz a caixa invadir a pessoa ao lado na fila.
+MARGEM_LATERAL_ROSTO = 1.2
 MARGEM_SUPERIOR_ROSTO = 0.7
-MARGEM_INFERIOR_ROSTO = 2.2
+MARGEM_INFERIOR_ROSTO = 4.0
 
 # Sobreposição mínima (IoU, de 0 a 1) para considerar que uma caixa
 # detectada agora é a mesma pessoa do frame anterior.
@@ -111,7 +174,8 @@ TAXA_MAXIMA_ANALISE_HZ = 15
 # DECISÃO DE ACESSO
 # ============================================================
 
-# Confiança mínima (0 a 1) para liberar. Ajustável na tela.
+# Confiança mínima (0 a 1) para considerar que a pessoa ESTÁ usando
+# um equipamento. Ajustável na tela. Mais alto = mais rigoroso.
 LIMIAR_CONFIANCA_PADRAO = 0.80
 
 # De quanto em quanto tempo (segundos) cada pessoa é reclassificada.
@@ -136,8 +200,8 @@ AMOSTRAS_MINIMAS_DECISAO = 2
 # ============================================================
 
 TITULO_JANELA = "SafeTech Entry - Reconhecimento de EPI"
-TAMANHO_INICIAL_JANELA = "1360x820"
-TAMANHO_MINIMO_JANELA = (1080, 680)
+TAMANHO_INICIAL_JANELA = "1360x860"
+TAMANHO_MINIMO_JANELA = (1080, 740)
 
 # Intervalo (ms) do laço de atualização da tela. 33 ms = ~30 quadros/s
 INTERVALO_TELA_MS = 33
@@ -180,13 +244,15 @@ PAINEL_WEB_MAXIMO_EVENTOS = 300
 # ============================================================
 
 LOTE_TREINO = 32
-EPOCAS_TREINO = 10
+EPOCAS_TREINO = 15
 FRACAO_VALIDACAO = 0.20
 SEMENTE_TREINO = 123
 TAXA_APRENDIZADO = 0.001
 TAXA_DROPOUT = 0.20
 
-EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
+# Mínimo de imagens rotuladas para o treino começar
+MINIMO_IMAGENS_TREINO = 20
 
-# Abaixo disso o treino funciona, mas o programa avisa que é pouco
-MINIMO_IMAGENS_RECOMENDADO = 10
+# Para cada EPI, o treino avisa se houver menos exemplos do que isto
+# "usando" ou "não usando" (o modelo precisa ver os dois casos)
+MINIMO_EXEMPLOS_POR_CASO = 10

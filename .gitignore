@@ -7,8 +7,14 @@
 dataset/*/*
 !dataset/*/.gitkeep
 
+# Planilha de rótulos das fotos de treino (só faz sentido junto delas)
+dataset/rotulos*.csv
+
 # Log de auditoria e fotos de evidência (gerados pelo programa)
 auditoria/
+
+# Última seleção de setor feita na tela (preferência de cada computador)
+preferencias.json
 
 # ============================================================
 # ARQUIVOS LOCAIS

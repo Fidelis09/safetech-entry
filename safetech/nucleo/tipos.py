@@ -23,10 +23,10 @@ class StatusPessoa(Enum):
     # Ainda não há classificações suficientes para decidir
     ANALISANDO = "analisando"
 
-    # Está com o EPI, com confiança acima do limiar
+    # Está usando todos os EPIs exigidos no setor
     LIBERADO = "liberado"
 
-    # Está sem EPI, ou a confiança ficou abaixo do limiar
+    # Falta pelo menos um EPI exigido
     NEGADO = "negado"
 
 
@@ -43,6 +43,23 @@ class StatusAcesso(Enum):
 
 
 # ============================================================
+# RESULTADO DE UM EPI PARA UMA PESSOA
+# ============================================================
+
+@dataclass(frozen=True)
+class ResultadoEPI:
+
+    # Chave do equipamento (ex.: "capacete"), como em config.EPIS
+    chave: str
+
+    # True se a confiança passou do limiar: a pessoa ESTÁ usando
+    presente: bool
+
+    # Confiança média de que a pessoa está usando, de 0.0 a 1.0
+    confianca: float
+
+
+# ============================================================
 # UMA PESSOA VISTA PELA CÂMERA
 # ============================================================
 
@@ -56,11 +73,11 @@ class PessoaObservada:
 
     status: StatusPessoa
 
-    # Classe prevista (ex.: "com_epi"); None enquanto estiver analisando
-    classe: str | None
+    # Resultado de cada EPI que o modelo conhece (vazio enquanto analisa)
+    itens: tuple[ResultadoEPI, ...] = ()
 
-    # Confiança média da classe prevista, de 0.0 a 1.0
-    confianca: float
+    # Chaves dos EPIs exigidos no setor que a pessoa NÃO está usando
+    faltando: tuple[str, ...] = ()
 
 
 # ============================================================
@@ -78,12 +95,19 @@ class EstadoCena:
 
     acesso: StatusAcesso = StatusAcesso.SEM_PESSOAS
 
+    # Setor em fiscalização e as chaves dos EPIs exigidos nele
+    setor: str = ""
+    exigidos: tuple[str, ...] = ()
+
     # Quantas análises por segundo a linha de detecção está fazendo
     analises_por_segundo: float = 0.0
 
 
 # ============================================================
 # UMA LINHA DO LOG DE AUDITORIA
+# ============================================================
+#
+# Todos os campos são texto, exatamente como ficam no CSV.
 # ============================================================
 
 @dataclass(frozen=True)
@@ -97,10 +121,17 @@ class RegistroAuditoria:
     # Identificação da pessoa na sessão, ex.: "P003"
     pessoa: str
 
-    classe: str
+    # Setor que estava sendo fiscalizado no momento
+    setor: str
 
-    # Confiança em porcentagem, já formatada (ex.: "93.50")
-    confianca_percentual: str
+    # EPIs exigidos no setor, ex.: "Capacete, Luvas"
+    exigidos: str
+
+    # EPIs exigidos que a pessoa não estava usando ("" se nenhum)
+    faltando: str
+
+    # Confiança de cada EPI, ex.: "Capacete 97%, Luvas 12%"
+    confiancas: str
 
     # "SIM" ou "NAO"
     liberado: str
@@ -115,8 +146,10 @@ class RegistroAuditoria:
             self.timestamp,
             self.evento,
             self.pessoa,
-            self.classe,
-            self.confianca_percentual,
+            self.setor,
+            self.exigidos,
+            self.faltando,
+            self.confiancas,
             self.liberado,
             self.imagem,
         ]

@@ -10,6 +10,7 @@ desenhados aqui usam apenas caracteres simples.
 
 import cv2
 
+from safetech import config
 from safetech.nucleo.tipos import PessoaObservada, StatusPessoa
 
 
@@ -30,14 +31,22 @@ FONTE = cv2.FONT_HERSHEY_SIMPLEX
 # ============================================================
 
 def texto_da_pessoa(pessoa: PessoaObservada) -> str:
-    """Ex.: "#3 COM EPI 92%" ou "#3 Analisando..."."""
+    """Ex.: "#3 OK", "#3 FALTA: CAPACETE, LUVAS" ou "#3 Analisando..."."""
 
     if pessoa.status is StatusPessoa.ANALISANDO:
         return f"#{pessoa.identificador} Analisando..."
 
-    classe = pessoa.classe.upper().replace("_", " ")
+    if pessoa.status is StatusPessoa.LIBERADO:
+        return f"#{pessoa.identificador} OK"
 
-    return f"#{pessoa.identificador} {classe} {pessoa.confianca * 100:.0f}%"
+    # Modelo antigo: não sabe dizer QUAL equipamento falta
+    if pessoa.faltando == (config.EPI_CONJUNTO,):
+        return f"#{pessoa.identificador} SEM EPI"
+
+    # As CHAVES dos EPIs não têm acento, por isso servem para o vídeo
+    faltando = ", ".join(chave.upper() for chave in pessoa.faltando)
+
+    return f"#{pessoa.identificador} FALTA: {faltando}"
 
 
 # ============================================================
