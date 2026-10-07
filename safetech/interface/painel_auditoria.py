@@ -24,12 +24,11 @@ from safetech.interface.tema import CORES, FONTES
 
 # Colunas da tabela: (campo do registro, título exibido, largura, alinhamento)
 COLUNAS_TABELA = [
-    ("timestamp", "Data e hora", 150, "w"),
-    ("evento", "Evento", 90, "center"),
-    ("pessoa", "Pessoa", 70, "center"),
-    ("classe", "Classe", 100, "center"),
-    ("confianca_percentual", "Confiança", 90, "center"),
-    ("liberado", "Acesso", 100, "center"),
+    ("timestamp", "Data e hora", 145, "w"),
+    ("pessoa", "Pessoa", 60, "center"),
+    ("setor", "Setor", 130, "w"),
+    ("faltando", "Faltando", 140, "w"),
+    ("liberado", "Acesso", 80, "center"),
 ]
 
 FILTRO_TODOS = "todos"
@@ -100,7 +99,7 @@ class PainelAuditoria(ttk.Frame):
         self._valor_total = self._criar_indicador(linha, 0, "Eventos", CORES["texto"])
         self._valor_liberados = self._criar_indicador(linha, 1, "Liberados", CORES["sucesso_texto"])
         self._valor_negados = self._criar_indicador(linha, 2, "Negados", CORES["perigo_texto"])
-        self._valor_taxa = self._criar_indicador(linha, 3, "Taxa de liberação", CORES["texto"])
+        self._valor_taxa = self._criar_indicador(linha, 3, "Liberação", CORES["texto"])
 
     def _criar_indicador(self, pai, coluna, titulo, cor_valor):
         """Cria um cartão de indicador; devolve o rótulo do valor."""
@@ -212,6 +211,16 @@ class PainelAuditoria(ttk.Frame):
         )
         self._rotulo_evidencia.pack(fill="x", pady=(8, 0))
 
+        # Detalhes do evento selecionado: o que o setor exigia e a
+        # confiança de cada EPI no momento da decisão
+        self._rotulo_detalhes = ttk.Label(
+            cartao,
+            text="",
+            style="Suave.Cartao.TLabel",
+            justify="left",
+        )
+        self._rotulo_detalhes.pack(anchor="w", pady=(6, 0))
+
         self._mostrar_texto_evidencia(
             "Selecione um evento para ver a foto. Duplo clique abre em tamanho real."
         )
@@ -322,10 +331,9 @@ class PainelAuditoria(ttk.Frame):
 
         valores = [
             registro.timestamp,
-            registro.evento.capitalize(),
             registro.pessoa,
-            registro.classe,
-            f"{registro.confianca_percentual}%",
+            registro.setor,
+            registro.faltando or "-",
             "Liberado" if liberado else "Negado",
         ]
 
@@ -356,17 +364,8 @@ class PainelAuditoria(ttk.Frame):
     @staticmethod
     def _chave_de_ordenacao(registro, campo):
 
-        valor = getattr(registro, campo)
-
-        # A confiança é guardada como texto; ordena como número
-        if campo == "confianca_percentual":
-
-            try:
-                return float(valor)
-            except ValueError:
-                return 0.0
-
-        return valor
+        # Sem diferenciar maiúsculas de minúsculas
+        return getattr(registro, campo).lower()
 
     # ============================================================
     # FOTO DE EVIDÊNCIA
@@ -387,6 +386,15 @@ class PainelAuditoria(ttk.Frame):
 
         if registro is None:
             return
+
+        evento = "Primeira decisão" if registro.evento == "ENTRADA" else "Mudança de decisão"
+
+        self._rotulo_detalhes.config(
+            text=(
+                f"{evento}   |   Exigidos: {registro.exigidos or 'nenhum'}\n"
+                f"Confiança: {registro.confiancas or '-'}"
+            )
+        )
 
         caminho = self._pasta_imagens / registro.imagem if registro.imagem else None
 

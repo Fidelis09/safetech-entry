@@ -29,9 +29,9 @@ from safetech.interface import tema
 from safetech.interface.painel_auditoria import PainelAuditoria
 from safetech.interface.painel_monitoramento import PainelMonitoramento
 from safetech.interface.tema import CORES
-from safetech.nucleo import anotacao
-from safetech.nucleo.classes import carregar_classes
+from safetech.nucleo import anotacao, epis
 from safetech.nucleo.tipos import EstadoCena, StatusAcesso, StatusPessoa
+from safetech.servicos import preferencias
 from safetech.servicos.analisador import Analisador, ParametrosAnalise
 from safetech.servicos.auditoria import ServicoAuditoria
 from safetech.servicos.camera import Camera, EstadoCamera
@@ -39,7 +39,7 @@ from safetech.servicos.dataset import ColetorDataset
 from safetech.web.servidor import ServidorWeb
 
 
-TEXTO_ATALHOS = "Espaço: ligar/desligar câmera   |   1, 2...: salvar imagem na classe   |   Esc: limpar busca"
+TEXTO_ATALHOS = "Espaço: ligar/desligar câmera   |   S: salvar imagem rotulada   |   Esc: limpar busca"
 
 
 class JanelaPrincipal:
@@ -58,7 +58,19 @@ class JanelaPrincipal:
 
         self._auditoria = ServicoAuditoria()
         self._coletor = ColetorDataset()
-        self._parametros = ParametrosAnalise()
+
+        # EPIs que o modelo instalado reconhece. Lido sem carregar o
+        # TensorFlow, para a tela já abrir com os controles certos.
+        self._epis_do_modelo = epis.epis_do_modelo()
+
+        # Fiscalização: reabre com o setor e os EPIs da última vez. Só
+        # pode ser exigido o que o modelo sabe reconhecer.
+        setor, exigidos = preferencias.carregar()
+
+        self._parametros = ParametrosAnalise(
+            setor=setor,
+            exigidos=tuple(chave for chave in exigidos if chave in self._epis_do_modelo),
+        )
 
         # Criados quando a IA terminar de carregar
         self._analisador = None
@@ -83,13 +95,11 @@ class JanelaPrincipal:
         # MONTAGEM DA TELA
         # ------------------------------------------------------
 
-        self._classes = self._ler_classes()
-
         self._montar()
         self._configurar_atalhos()
 
         self._painel_auditoria.carregar(self._auditoria.carregar_historico())
-        self._atualizar_contagens()
+        self._atualizar_resumo_dataset()
 
         self._servidor_web = None
         self._iniciar_painel_web()
@@ -112,15 +122,6 @@ class JanelaPrincipal:
     # ============================================================
     # MONTAGEM
     # ============================================================
-
-    @staticmethod
-    def _ler_classes():
-        """Lê as classes para montar os botões de coleta (lista vazia se não houver modelo)."""
-
-        try:
-            return carregar_classes()
-        except (OSError, ValueError):
-            return []
 
     def _montar(self):
 
@@ -151,12 +152,15 @@ class JanelaPrincipal:
 
         self._painel_monitoramento = PainelMonitoramento(
             divisor,
-            classes=self._classes,
+            epis_do_modelo=self._epis_do_modelo,
+            setor_inicial=self._parametros.setor,
+            exigidos_iniciais=self._parametros.exigidos,
             limiar_inicial=self._parametros.limiar_confianca,
             intervalo_inicial=self._parametros.intervalo_classificacao,
             ao_alternar_camera=self._alternar_camera,
-            ao_capturar=self._capturar,
+            ao_salvar_imagem=self._salvar_imagem,
             ao_mudar_parametros=self._mudar_parametros,
+            ao_mudar_fiscalizacao=self._mudar_fiscalizacao,
         )
 
         self._painel_auditoria = PainelAuditoria(
@@ -189,13 +193,9 @@ class JanelaPrincipal:
         self._raiz.bind_all("<space>", self._atalho(self._alternar_camera))
         self._raiz.bind_all("<Escape>", lambda _evento: self._painel_auditoria.limpar_filtro())
 
-        # Teclas 1, 2, ... salvam uma imagem na classe correspondente
-        for indice, nome_classe in enumerate(self._classes[:9], start=1):
-
-            self._raiz.bind_all(
-                str(indice),
-                self._atalho(lambda classe=nome_classe: self._capturar(classe)),
-            )
+        # S (maiúsculo ou minúsculo) salva uma imagem com os rótulos marcados
+        for tecla in ("s", "S"):
+            self._raiz.bind_all(tecla, self._atalho(self._painel_monitoramento.salvar_imagem))
 
     def _atalho(self, acao):
         """Embrulha uma ação de atalho: ela não dispara enquanto o usuário digita na busca."""
@@ -261,10 +261,11 @@ class JanelaPrincipal:
 
         try:
 
-            if not config.ARQUIVO_MODELO.exists() or not config.ARQUIVO_CLASSES.exists():
+            if not self._epis_do_modelo:
 
                 raise FileNotFoundError(
-                    "Modelo não encontrado em 'modelos/'. Execute o treinar.py primeiro."
+                    "Nenhum modelo encontrado em 'modelos/'. Colete imagens "
+                    "rotuladas e execute o treinar.py."
                 )
 
             # Importados aqui, e não no topo do arquivo, porque trazem
@@ -272,16 +273,7 @@ class JanelaPrincipal:
             from safetech.nucleo.classificador import ClassificadorEPI
             from safetech.nucleo.detector import DetectorPessoas
 
-            classificador = ClassificadorEPI()
-
-            if config.CLASSE_LIBERA_ACESSO not in classificador.classes:
-
-                raise ValueError(
-                    f"A classe '{config.CLASSE_LIBERA_ACESSO}' não existe em classes.json "
-                    f"(classes encontradas: {classificador.classes})."
-                )
-
-            self._resultado_carga = ("ok", classificador, DetectorPessoas())
+            self._resultado_carga = ("ok", ClassificadorEPI(), DetectorPessoas())
 
         except Exception as erro:
             self._resultado_carga = ("erro", str(erro))
@@ -303,6 +295,14 @@ class JanelaPrincipal:
             self._painel_monitoramento.definir_botao_camera("Indisponível", "Primario.TButton", False)
 
             return
+
+        if not self._resultado_carga[1].por_epi:
+
+            self._avisar(
+                "Modelo antigo em uso: avalia só o conjunto completo de EPIs, "
+                "sem distinguir cada equipamento.",
+                segundos=15,
+            )
 
         _, classificador, detector = self._resultado_carga
 
@@ -469,24 +469,34 @@ class JanelaPrincipal:
 
         total = len(estado.pessoas)
 
-        liberadas = sum(1 for pessoa in estado.pessoas if pessoa.status is StatusPessoa.LIBERADO)
-        negadas = sum(1 for pessoa in estado.pessoas if pessoa.status is StatusPessoa.NEGADO)
-
         plural = "pessoa" if total == 1 else "pessoas"
+
+        # O que está sendo cobrado, para o status se explicar sozinho
+        if estado.exigidos:
+            exigencia = f"Setor {estado.setor}: exige {epis.nomes_dos_epis(estado.exigidos)}."
+        else:
+            exigencia = f"Setor {estado.setor}: nenhum EPI exigido."
 
         if estado.acesso is StatusAcesso.LIBERADO:
 
             return (
                 "ACESSO LIBERADO",
-                f"{total} {plural} na imagem, todas com EPI.",
+                f"{total} {plural} na imagem, todas em conformidade.\n{exigencia}",
                 CORES["sucesso"],
             )
 
         if estado.acesso is StatusAcesso.NEGADO:
 
+            # Diz QUEM está sem O QUÊ, ex.: "#2 sem Capacete, Luvas"
+            pendencias = "   |   ".join(
+                f"#{pessoa.identificador} sem {epis.nomes_dos_epis(pessoa.faltando)}"
+                for pessoa in estado.pessoas
+                if pessoa.status is StatusPessoa.NEGADO
+            )
+
             return (
                 "ACESSO NEGADO",
-                f"{total} {plural} na imagem: {liberadas} com EPI, {negadas} sem EPI.",
+                f"{pendencias}\n{exigencia}",
                 CORES["perigo"],
             )
 
@@ -494,13 +504,13 @@ class JanelaPrincipal:
 
             return (
                 "ANALISANDO",
-                f"{total} {plural} na imagem, verificando os equipamentos...",
+                f"{total} {plural} na imagem, verificando os equipamentos...\n{exigencia}",
                 CORES["alerta"],
             )
 
         return (
             "AGUARDANDO",
-            "Nenhuma pessoa na frente da câmera.",
+            f"Nenhuma pessoa na frente da câmera.\n{exigencia}",
             CORES["neutro"],
         )
 
@@ -566,8 +576,28 @@ class JanelaPrincipal:
         self._parametros.limiar_confianca = limiar_confianca
         self._parametros.intervalo_classificacao = intervalo_classificacao
 
-    def _capturar(self, nome_classe):
-        """Salva no dataset o recorte de cada pessoa do frame atual."""
+    def _mudar_fiscalizacao(self, setor, exigidos):
+        """
+        Chamado quando o usuário escolhe um setor ou marca/desmarca um EPI.
+
+        O efeito é imediato: o analisador passa a cobrar só os EPIs
+        marcados já no próximo ciclo. A seleção também é gravada, para
+        o programa reabrir com ela.
+        """
+
+        self._parametros.setor = setor
+        self._parametros.exigidos = tuple(exigidos)
+
+        preferencias.salvar(setor, exigidos)
+
+        # O texto da faixa de status depende do setor
+        self._ultimo_status = None
+
+    def _salvar_imagem(self, usando):
+        """
+        Salva no dataset o recorte de cada pessoa do frame atual, com
+        os rótulos marcados na tela (quais EPIs a pessoa está usando).
+        """
 
         frame, _ = self._camera.ler()
 
@@ -577,25 +607,23 @@ class JanelaPrincipal:
 
         caixas = [pessoa.caixa for pessoa in self._analisador.estado().pessoas]
 
-        arquivos = self._coletor.salvar(frame, caixas, nome_classe)
+        arquivos = self._coletor.salvar(frame, caixas, usando)
 
-        self._atualizar_contagens()
+        self._atualizar_resumo_dataset()
 
         descricao = "1 imagem salva" if len(arquivos) == 1 else f"{len(arquivos)} imagens salvas"
 
         if not caixas:
             descricao += " (ninguém detectado: frame inteiro)"
 
-        self._avisar(f"{descricao} em dataset/{nome_classe}.")
+        # Repete os rótulos no aviso: é a chance de perceber um engano
+        rotulos = epis.nomes_dos_epis(chave for chave in config.EPIS if chave in usando)
 
-    def _atualizar_contagens(self):
+        self._avisar(f"{descricao}, rotulada como usando: {rotulos or 'nenhum EPI'}.")
 
-        for nome_classe in self._classes:
+    def _atualizar_resumo_dataset(self):
 
-            self._painel_monitoramento.definir_contagem(
-                nome_classe,
-                self._coletor.contar_imagens(nome_classe),
-            )
+        self._painel_monitoramento.definir_resumo_dataset(*self._coletor.resumo())
 
     # ============================================================
     # AVISOS NA BARRA DE STATUS

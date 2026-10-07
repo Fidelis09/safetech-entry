@@ -1,8 +1,11 @@
 """
 Painel de monitoramento (lado esquerdo da janela).
 
-Mostra o vídeo da webcam, a faixa de status do acesso, os controles de
-ajuste e os botões de coleta de imagens para o dataset.
+Mostra o vídeo da webcam, a faixa de status do acesso e três cartões:
+
+    Fiscalização -> qual setor está sendo fiscalizado e quais EPIs ele exige
+    Ajustes      -> limiar de confiança, intervalo de análise e botão da câmera
+    Coleta       -> salva imagens rotuladas para treinar o modelo
 
 O painel só exibe e avisa: as ações de verdade (ligar câmera, salvar
 imagem, mudar parâmetros) são funções recebidas da janela principal.
@@ -11,7 +14,9 @@ imagem, mudar parâmetros) são funções recebidas da janela principal.
 import tkinter as tk
 from tkinter import ttk
 
+from safetech import config
 from safetech.interface.tema import CORES, FONTES
+from safetech.nucleo.epis import nome_do_epi
 
 
 class PainelMonitoramento(ttk.Frame):
@@ -19,27 +24,47 @@ class PainelMonitoramento(ttk.Frame):
     def __init__(
         self,
         pai,
-        classes,
+        epis_do_modelo,
+        setor_inicial,
+        exigidos_iniciais,
         limiar_inicial,
         intervalo_inicial,
         ao_alternar_camera,
-        ao_capturar,
+        ao_salvar_imagem,
         ao_mudar_parametros,
+        ao_mudar_fiscalizacao,
     ):
+        """
+        epis_do_modelo -> chaves dos EPIs que o modelo instalado reconhece.
+                          Só eles podem ser exigidos (não dá para fiscalizar
+                          o que o modelo não sabe ver).
+        """
 
         super().__init__(pai, style="Painel.TFrame", padding=18)
 
-        self._ao_capturar = ao_capturar
+        self._epis_do_modelo = set(epis_do_modelo)
+
+        self._ao_salvar_imagem = ao_salvar_imagem
         self._ao_mudar_parametros = ao_mudar_parametros
+        self._ao_mudar_fiscalizacao = ao_mudar_fiscalizacao
 
         # Variáveis ligadas aos controles deslizantes
         self._limiar = tk.DoubleVar(value=limiar_inicial * 100)
         self._intervalo = tk.DoubleVar(value=intervalo_inicial)
 
+        # Fiscalização: setor escolhido e uma caixa de seleção por EPI
+        self._setor = tk.StringVar(value=setor_inicial)
+
+        self._exigir = {
+            chave: tk.BooleanVar(value=chave in exigidos_iniciais and chave in self._epis_do_modelo)
+            for chave in config.EPIS
+        }
+
+        # Coleta: o que a pessoa na câmera está usando (rótulos da imagem)
+        self._usando = {chave: tk.BooleanVar(value=False) for chave in config.EPIS}
+
         # Referência à imagem em exibição (sem ela o Tkinter apaga a imagem)
         self._imagem_video = None
-
-        self._botoes_captura = {}
 
         # A coluna única e a linha do vídeo ocupam todo o espaço que
         # sobrar; as outras linhas ficam com a altura do conteúdo.
@@ -49,8 +74,9 @@ class PainelMonitoramento(ttk.Frame):
         self._montar_cabecalho()
         self._montar_video()
         self._montar_status()
-        self._montar_controles(ao_alternar_camera)
-        self._montar_coleta(classes)
+        self._montar_fiscalizacao()
+        self._montar_ajustes(ao_alternar_camera)
+        self._montar_coleta()
 
     # ============================================================
     # MONTAGEM
@@ -81,7 +107,7 @@ class PainelMonitoramento(ttk.Frame):
             highlightthickness=1,
             highlightbackground=CORES["borda"],
             width=320,
-            height=240,
+            height=200,
         )
         self._tela.grid(row=1, column=0, sticky="nsew")
 
@@ -101,8 +127,8 @@ class PainelMonitoramento(ttk.Frame):
 
     def _montar_status(self):
 
-        self._faixa_status = tk.Frame(self, bg=CORES["neutro"], padx=18, pady=12)
-        self._faixa_status.grid(row=2, column=0, sticky="ew", pady=12)
+        self._faixa_status = tk.Frame(self, bg=CORES["neutro"], padx=18, pady=10)
+        self._faixa_status.grid(row=2, column=0, sticky="ew", pady=10)
 
         self._rotulo_status = tk.Label(
             self._faixa_status,
@@ -121,13 +147,84 @@ class PainelMonitoramento(ttk.Frame):
             bg=CORES["neutro"],
             fg="white",
             anchor="w",
+            justify="left",
         )
         self._rotulo_detalhe.pack(fill="x")
 
-    def _montar_controles(self, ao_alternar_camera):
+    # ------------------------------------------------------
+    # CARTÃO: FISCALIZAÇÃO (setor e EPIs exigidos)
+    # ------------------------------------------------------
 
-        cartao = ttk.Frame(self, style="Cartao.TFrame", padding=14)
+    def _montar_fiscalizacao(self):
+
+        cartao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 10))
         cartao.grid(row=3, column=0, sticky="ew")
+
+        linha = ttk.Frame(cartao, style="Cartao.TFrame")
+        linha.pack(fill="x")
+
+        ttk.Label(
+            linha, text="Fiscalização", style="Cartao.TLabel", font=FONTES["texto_negrito"]
+        ).pack(side="left")
+
+        ttk.Label(linha, text="Setor", style="Suave.Cartao.TLabel").pack(side="left", padx=(16, 6))
+
+        # Lista de setores prontos. "readonly": só dá para escolher da lista
+        self._caixa_setor = ttk.Combobox(
+            linha,
+            textvariable=self._setor,
+            values=list(config.SETORES),
+            state="readonly",
+            width=24,
+            takefocus=False,
+        )
+        self._caixa_setor.pack(side="left")
+        self._caixa_setor.bind("<<ComboboxSelected>>", self._ao_escolher_setor)
+
+        # Os EPIs ficam numa segunda linha, para caberem mesmo com a
+        # janela estreita (ou com mais equipamentos cadastrados)
+        linha_epis = ttk.Frame(cartao, style="Cartao.TFrame")
+        linha_epis.pack(fill="x", pady=(8, 0))
+
+        ttk.Label(linha_epis, text="EPIs exigidos", style="Suave.Cartao.TLabel").pack(side="left")
+
+        for chave in config.EPIS:
+
+            caixa = ttk.Checkbutton(
+                linha_epis,
+                text=nome_do_epi(chave),
+                variable=self._exigir[chave],
+                style="Cartao.TCheckbutton",
+                command=self._ao_marcar_exigido,
+                takefocus=False,
+            )
+            caixa.pack(side="left", padx=(12, 0))
+
+            # EPI que o modelo não reconhece não pode ser exigido
+            if chave not in self._epis_do_modelo:
+                caixa.state(["disabled"])
+
+        # Aviso mostrado quando o modelo instalado não distingue os EPIs
+        self._rotulo_aviso_modelo = ttk.Label(cartao, text="", style="Suave.Cartao.TLabel")
+
+        if not self._epis_do_modelo & set(config.EPIS):
+
+            self._caixa_setor.state(["disabled"])
+
+            self._rotulo_aviso_modelo.config(
+                text="O modelo instalado ainda não distingue os equipamentos. "
+                     "Colete imagens rotuladas abaixo e rode o treinar.py para ativar."
+            )
+            self._rotulo_aviso_modelo.pack(anchor="w", pady=(6, 0))
+
+    # ------------------------------------------------------
+    # CARTÃO: AJUSTES (limiar, intervalo, câmera)
+    # ------------------------------------------------------
+
+    def _montar_ajustes(self, ao_alternar_camera):
+
+        cartao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 10))
+        cartao.grid(row=4, column=0, sticky="ew", pady=(10, 0))
 
         # Três colunas: dois controles deslizantes e o botão da câmera
         cartao.columnconfigure(0, weight=1, uniform="controles")
@@ -136,7 +233,7 @@ class PainelMonitoramento(ttk.Frame):
         self._rotulo_limiar = self._criar_deslizante(
             cartao,
             coluna=0,
-            titulo="Limiar de confiança",
+            titulo="Confiança mínima",
             variavel=self._limiar,
             minimo=50,
             maximo=99,
@@ -157,7 +254,7 @@ class PainelMonitoramento(ttk.Frame):
             style="Primario.TButton",
             command=ao_alternar_camera,
             takefocus=False,
-            width=18,
+            width=15,
             state="disabled",
         )
         self._botao_camera.grid(row=0, column=2, rowspan=2, sticky="nsew", padx=(16, 0))
@@ -168,7 +265,7 @@ class PainelMonitoramento(ttk.Frame):
         """Cria um controle deslizante com título e valor; devolve o rótulo do valor."""
 
         # Espaço entre os dois controles
-        margem = (0, 28) if coluna == 0 else (0, 0)
+        margem = (0, 20) if coluna == 0 else (0, 0)
 
         linha_titulo = ttk.Frame(pai, style="Cartao.TFrame")
         linha_titulo.grid(row=0, column=coluna, sticky="ew", padx=margem)
@@ -190,46 +287,53 @@ class PainelMonitoramento(ttk.Frame):
 
         return rotulo_valor
 
-    def _montar_coleta(self, classes):
+    # ------------------------------------------------------
+    # CARTÃO: COLETA DE IMAGENS ROTULADAS
+    # ------------------------------------------------------
 
-        cartao = ttk.Frame(self, style="Cartao.TFrame", padding=14)
-        cartao.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+    def _montar_coleta(self):
+
+        cartao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 10))
+        cartao.grid(row=5, column=0, sticky="ew", pady=(10, 0))
+
+        cartao.columnconfigure(0, weight=1)
+
+        linha = ttk.Frame(cartao, style="Cartao.TFrame")
+        linha.grid(row=0, column=0, sticky="ew")
+
+        # O botão é posicionado primeiro (à direita) para nunca ser
+        # cortado; se faltar espaço, quem encolhe é o resumo do dataset.
+        ttk.Button(
+            linha,
+            text="Salvar imagem  [S]",
+            style="Primario.TButton",
+            command=self.salvar_imagem,
+            takefocus=False,
+        ).pack(side="right", padx=(12, 0))
 
         ttk.Label(
-            cartao,
-            text="Coleta de imagens para o dataset",
-            style="Cartao.TLabel",
-            font=FONTES["texto_negrito"],
-        ).pack(anchor="w")
+            linha, text="Coleta de imagens", style="Cartao.TLabel", font=FONTES["texto_negrito"]
+        ).pack(side="left")
 
-        ttk.Label(
-            cartao,
-            text="Salva o recorte de cada pessoa detectada direto na pasta de treino da classe.",
-            style="Suave.Cartao.TLabel",
-        ).pack(anchor="w", pady=(2, 10))
+        # Situação do dataset (total e quantas imagens por EPI)
+        self._rotulo_dataset = ttk.Label(linha, text="", style="Suave.Cartao.TLabel")
+        self._rotulo_dataset.pack(side="left", padx=(16, 0))
 
-        linha_botoes = ttk.Frame(cartao, style="Cartao.TFrame")
-        linha_botoes.pack(fill="x")
+        # Rótulos da próxima imagem: o que a pessoa está usando agora
+        linha_epis = ttk.Frame(cartao, style="Cartao.TFrame")
+        linha_epis.grid(row=1, column=0, sticky="ew", pady=(8, 0))
 
-        for indice, nome_classe in enumerate(classes):
+        ttk.Label(linha_epis, text="A pessoa está usando", style="Suave.Cartao.TLabel").pack(side="left")
 
-            linha_botoes.columnconfigure(indice, weight=1, uniform="captura")
+        for chave in config.EPIS:
 
-            botao = ttk.Button(
-                linha_botoes,
-                style="Primario.TButton",
-                command=lambda classe=nome_classe: self._ao_capturar(classe),
+            ttk.Checkbutton(
+                linha_epis,
+                text=nome_do_epi(chave),
+                variable=self._usando[chave],
+                style="Cartao.TCheckbutton",
                 takefocus=False,
-            )
-
-            botao.grid(
-                row=0,
-                column=indice,
-                sticky="ew",
-                padx=(0 if indice == 0 else 8, 0),
-            )
-
-            self._botoes_captura[nome_classe] = (botao, indice + 1)
+            ).pack(side="left", padx=(12, 0))
 
     # ============================================================
     # EVENTOS INTERNOS
@@ -256,9 +360,58 @@ class PainelMonitoramento(ttk.Frame):
         self._rotulo_limiar.config(text=f"{self._limiar.get():.0f}%")
         self._rotulo_intervalo.config(text=f"{self._intervalo.get():.1f} s")
 
+    def _exigidos(self):
+        """Chaves dos EPIs marcados como obrigatórios, na ordem de config.EPIS."""
+
+        return tuple(chave for chave in config.EPIS if self._exigir[chave].get())
+
+    def _ao_escolher_setor(self, _evento=None):
+        """Escolher um setor pronto marca de uma vez os EPIs que ele exige."""
+
+        # Tira a seleção azul do texto, que o Tkinter deixa na caixa
+        self._caixa_setor.selection_clear()
+
+        exigidos_do_setor = config.SETORES.get(self._setor.get(), [])
+
+        for chave, variavel in self._exigir.items():
+            variavel.set(chave in exigidos_do_setor and chave in self._epis_do_modelo)
+
+        self._avisar_fiscalizacao()
+
+    def _ao_marcar_exigido(self):
+        """
+        Marcar ou desmarcar um EPI à mão: se a combinação bater com um
+        setor pronto, o nome dele aparece; senão, vira "Personalizado".
+        """
+
+        marcados = set(self._exigidos())
+
+        setor = config.SETOR_PERSONALIZADO
+
+        for nome, exigidos_do_setor in config.SETORES.items():
+
+            if set(exigidos_do_setor) == marcados:
+                setor = nome
+                break
+
+        self._setor.set(setor)
+
+        self._avisar_fiscalizacao()
+
+    def _avisar_fiscalizacao(self):
+
+        self._ao_mudar_fiscalizacao(self._setor.get(), self._exigidos())
+
     # ============================================================
     # MÉTODOS USADOS PELA JANELA PRINCIPAL
     # ============================================================
+
+    def salvar_imagem(self):
+        """Pede à janela principal para salvar o frame com os rótulos marcados."""
+
+        self._ao_salvar_imagem(
+            {chave for chave, variavel in self._usando.items() if variavel.get()}
+        )
 
     def tamanho_do_video(self):
         """(largura, altura) em pixels do espaço disponível para o vídeo."""
@@ -302,9 +455,21 @@ class PainelMonitoramento(ttk.Frame):
 
         self._rotulo_desempenho.config(text=texto)
 
-    def definir_contagem(self, nome_classe, quantidade):
-        """Atualiza o texto do botão de coleta com o total de imagens da classe."""
+    def definir_resumo_dataset(self, total, usando_por_epi):
+        """Mostra quantas imagens rotuladas existem, no total e por EPI."""
 
-        botao, atalho = self._botoes_captura[nome_classe]
+        if total == 0:
+            texto = "Nenhuma imagem rotulada ainda."
 
-        botao.config(text=f"[{atalho}]  Salvar em {nome_classe}  ({quantidade})")
+        else:
+
+            # Ex.: "128 imagens: Capacete 60, Óculos 41, ..." (quantas
+            # mostram a pessoa USANDO cada equipamento)
+            partes = [
+                f"{nome_do_epi(chave)} {quantidade}"
+                for chave, quantidade in usando_por_epi.items()
+            ]
+
+            texto = f"{total} imagens: " + ", ".join(partes)
+
+        self._rotulo_dataset.config(text=texto)

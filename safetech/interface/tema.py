@@ -189,6 +189,62 @@ def aplicar_tema(janela, escala=1.0):
         padding=6,
     )
 
+    # Caixas de seleção (EPIs exigidos e rótulos da coleta)
+    estilo.configure(
+        "Cartao.TCheckbutton",
+        background=CORES["cartao"],
+        foreground=CORES["texto"],
+        indicatorbackground=CORES["fundo"],
+        indicatorforeground="white",
+        upperbordercolor=CORES["texto_suave"],
+        lowerbordercolor=CORES["texto_suave"],
+        indicatorsize=int(15 * escala),
+        padding=(2, 2),
+    )
+
+    estilo.map(
+        "Cartao.TCheckbutton",
+        background=[("active", CORES["cartao"])],
+        foreground=[("disabled", CORES["borda"])],
+        indicatorbackground=[
+            ("disabled", CORES["cartao"]),
+            ("selected", CORES["destaque"]),
+        ],
+        upperbordercolor=[("disabled", CORES["borda"]), ("selected", CORES["destaque"])],
+        lowerbordercolor=[("disabled", CORES["borda"]), ("selected", CORES["destaque"])],
+    )
+
+    # Lista de escolha do setor
+    estilo.configure(
+        "TCombobox",
+        fieldbackground=CORES["fundo"],
+        background=CORES["borda"],
+        foreground=CORES["texto"],
+        arrowcolor=CORES["texto"],
+        bordercolor=CORES["borda"],
+        lightcolor=CORES["borda"],
+        darkcolor=CORES["borda"],
+        selectbackground=CORES["fundo"],
+        selectforeground=CORES["texto"],
+        padding=5,
+    )
+
+    estilo.map(
+        "TCombobox",
+        fieldbackground=[("disabled", CORES["cartao"]), ("readonly", CORES["fundo"])],
+        foreground=[("disabled", CORES["borda"])],
+        arrowcolor=[("disabled", CORES["borda"])],
+        selectbackground=[("readonly", CORES["fundo"])],
+    )
+
+    # A lista que se abre ao clicar não é um componente ttk; suas
+    # cores são definidas pelo banco de opções do Tkinter.
+    janela.option_add("*TCombobox*Listbox.background", CORES["cartao"])
+    janela.option_add("*TCombobox*Listbox.foreground", CORES["texto"])
+    janela.option_add("*TCombobox*Listbox.selectBackground", CORES["destaque"])
+    janela.option_add("*TCombobox*Listbox.selectForeground", "white")
+    janela.option_add("*TCombobox*Listbox.font", FONTES["texto"])
+
     # ------------------------------------------------------
     # TABELA
     # ------------------------------------------------------
