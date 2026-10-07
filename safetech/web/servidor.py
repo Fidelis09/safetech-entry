@@ -30,6 +30,7 @@ import cv2
 
 from safetech import config
 from safetech.nucleo import anotacao
+from safetech.nucleo.epis import nome_do_epi
 from safetech.nucleo.tipos import EstadoCena
 
 
@@ -114,12 +115,23 @@ class ServidorWeb:
             "disponivel": self._fonte_ao_vivo is not None,
             "camera_ativa": frame is not None,
             "acesso": estado.acesso.value,
+            # O que está sendo fiscalizado (o painel só mostra; quem
+            # escolhe o setor é o operador, no aplicativo)
+            "setor": estado.setor,
+            "exigidos": [nome_do_epi(chave) for chave in estado.exigidos],
             "pessoas": [
                 {
                     "identificador": pessoa.identificador,
                     "status": pessoa.status.value,
-                    "classe": pessoa.classe,
-                    "confianca": round(pessoa.confianca * 100, 1),
+                    "faltando": [nome_do_epi(chave) for chave in pessoa.faltando],
+                    "itens": [
+                        {
+                            "nome": nome_do_epi(item.chave),
+                            "presente": item.presente,
+                            "confianca": round(item.confianca * 100),
+                        }
+                        for item in pessoa.itens
+                    ],
                 }
                 for pessoa in estado.pessoas
             ],

@@ -297,7 +297,7 @@
 
   <!-- ====================== AO VIVO ====================== -->
   <section class="secao">
-    <h2>Ao vivo</h2>
+    <h2>Ao vivo <span class="apoio" id="setor-atual"></span></h2>
 
     <div class="video">
       <img id="imagem-ao-vivo" alt="Imagem atual da câmera da catraca" hidden>
@@ -358,7 +358,7 @@
       <button type="button" data-filtro="todos" aria-pressed="true">Todos</button>
       <button type="button" data-filtro="SIM" aria-pressed="false">Liberados</button>
       <button type="button" data-filtro="NAO" aria-pressed="false">Negados</button>
-      <input type="search" id="busca" placeholder="Buscar por data, pessoa, classe..." aria-label="Buscar eventos">
+      <input type="search" id="busca" placeholder="Buscar por data, pessoa, setor, EPI..." aria-label="Buscar eventos">
     </div>
 
     <div class="rolagem">
@@ -367,10 +367,10 @@
           <tr>
             <th>Foto</th>
             <th>Data e hora</th>
-            <th>Evento</th>
             <th>Pessoa</th>
-            <th>Classe</th>
-            <th>Confiança</th>
+            <th>Setor</th>
+            <th>Exigidos</th>
+            <th>Faltando</th>
             <th>Acesso</th>
           </tr>
         </thead>
@@ -463,6 +463,12 @@ function desenharAoVivo(dados) {
 
   lista.replaceChildren();
 
+  // Setor em fiscalização e o que ele exige. Só informativo: a
+  // escolha do setor é feita pelo operador, no aplicativo.
+  el("setor-atual").textContent = dados.setor
+    ? "Setor: " + dados.setor + " · exige " + (dados.exigidos.join(", ") || "nenhum EPI")
+    : "";
+
   if (!dados.camera_ativa) {
     mostrarSemVideo(dados.disponivel
       ? "Câmera desligada no aplicativo."
@@ -489,13 +495,22 @@ function desenharAoVivo(dados) {
   el("detalhe-status").textContent = total === 0
     ? "Nenhuma pessoa na frente da câmera."
     : total + (total === 1 ? " pessoa" : " pessoas") + " na imagem: "
-      + liberadas + " com EPI, " + negadas + " sem EPI.";
+      + liberadas + " em conformidade, " + negadas + " com EPI faltando.";
 
+  // Um marcador por pessoa, dizendo O QUE falta (não só que falta)
   for (const pessoa of dados.pessoas) {
-    const texto = pessoa.status === "analisando"
-      ? "#" + pessoa.identificador + " analisando"
-      : "#" + pessoa.identificador + " " + pessoa.classe + " " + pessoa.confianca.toFixed(0) + "%";
-    lista.append(criar("span", texto, "marcador " + pessoa.status));
+    let texto = "#" + pessoa.identificador;
+
+    if (pessoa.status === "analisando") texto += " analisando";
+    else if (pessoa.status === "liberado") texto += " em conformidade";
+    else texto += " sem " + pessoa.faltando.join(", ");
+
+    const marcador = criar("span", texto, "marcador " + pessoa.status);
+
+    // Passar o mouse mostra a confiança de cada equipamento
+    marcador.title = pessoa.itens.map((item) => item.nome + " " + item.confianca + "%").join("  |  ");
+
+    lista.append(marcador);
   }
 }
 
@@ -693,10 +708,10 @@ function desenharTabela() {
     linha.append(
       celulaFoto,
       criar("td", evento.timestamp, "numero"),
-      criar("td", evento.evento === "ENTRADA" ? "Entrada" : "Mudança"),
       criar("td", evento.pessoa),
-      criar("td", evento.classe),
-      criar("td", evento.confianca_percentual + "%", "numero"),
+      criar("td", evento.setor),
+      criar("td", evento.exigidos || "-"),
+      criar("td", evento.faltando || "-"),
       celulaAcesso,
     );
 
@@ -721,7 +736,9 @@ function abrirFoto(evento) {
     criar("span", liberado ? "Liberado" : "Negado", "marcador " + (liberado ? "liberado" : "negado")),
     criar("strong", evento.timestamp),
     criar("span", "Pessoa " + evento.pessoa),
-    criar("span", evento.classe + " (" + evento.confianca_percentual + "%)"),
+    criar("span", "Setor: " + evento.setor),
+    criar("span", evento.faltando ? "Faltando: " + evento.faltando : "Nada faltando"),
+    criar("span", "Confiança: " + (evento.confiancas || "-")),
   );
 
   el("janela-foto").showModal();
