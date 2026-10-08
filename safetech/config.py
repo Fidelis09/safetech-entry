@@ -120,7 +120,7 @@ CLASSE_LIBERA_ACESSO = "com_epi"
 # ============================================================
 
 # 0 = webcam padrão do computador
-INDICE_CAMERA = 0
+INDICE_CAMERA = 1
 
 # No Windows o backend DirectShow abre a webcam bem mais rápido
 # que o backend padrão (MSMF).
