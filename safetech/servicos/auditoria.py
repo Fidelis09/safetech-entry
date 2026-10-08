@@ -134,8 +134,6 @@ class ServicoAuditoria:
                 f"_P{identificador_pessoa:03d}.jpg"
             )
 
-            cv2.imwrite(str(self._pasta_imagens / nome_imagem), imagem_bgr)
-
         registro = RegistroAuditoria(
             timestamp=agora.strftime("%Y-%m-%d %H:%M:%S"),
             evento=evento,
@@ -152,12 +150,70 @@ class ServicoAuditoria:
             imagem=nome_imagem,
         )
 
+        # A foto e a linha do CSV são gravadas juntas, dentro da trava:
+        # assim o botão "Zerar" nunca pega um evento pela metade (a
+        # foto de um lado e a linha do outro).
         with self._trava:
+
+            if nome_imagem:
+                cv2.imwrite(str(self._pasta_imagens / nome_imagem), imagem_bgr)
 
             with open(self._arquivo_log, "a", newline="", encoding="utf-8") as arquivo:
                 csv.writer(arquivo).writerow(registro.como_linha())
 
         return registro
+
+    # ============================================================
+    # ZERAR (arquivando, sem apagar)
+    # ============================================================
+
+    def zerar(self):
+        """
+        Esvazia o log e a pasta de fotos, deixando tudo pronto para
+        começar do zero.
+
+        Nada é apagado: o log e as fotos são MOVIDOS para uma pasta
+        "arquivados/<data e hora>", dentro da pasta de auditoria. Um
+        registro de auditoria não deve sumir por um clique; se o
+        arquivo não interessar, a pasta pode ser excluída à mão.
+
+        Devolve (pasta_do_arquivo, eventos, fotos); a pasta é None se
+        não havia nada para arquivar.
+        """
+
+        with self._trava:
+
+            eventos = self._contar_eventos()
+
+            fotos = [caminho for caminho in self._pasta_imagens.iterdir() if caminho.is_file()]
+
+            if eventos == 0 and not fotos:
+                return None, 0, 0
+
+            destino = (
+                self._arquivo_log.parent
+                / "arquivados"
+                / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            )
+
+            (destino / "imagens").mkdir(parents=True, exist_ok=True)
+
+            self._arquivo_log.rename(destino / self._arquivo_log.name)
+
+            for foto in fotos:
+                foto.rename(destino / "imagens" / foto.name)
+
+            # Log novo, vazio, só com o cabeçalho
+            with open(self._arquivo_log, "w", newline="", encoding="utf-8") as arquivo:
+                csv.writer(arquivo).writerow(COLUNAS)
+
+        return destino, eventos, len(fotos)
+
+    def _contar_eventos(self) -> int:
+        """Linhas de evento no CSV (sem o cabeçalho). Chamar dentro da trava."""
+
+        with open(self._arquivo_log, "r", newline="", encoding="utf-8", errors="replace") as arquivo:
+            return max(0, sum(1 for _ in csv.reader(arquivo)) - 1)
 
     # ============================================================
     # LEITURA

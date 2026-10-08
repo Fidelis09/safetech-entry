@@ -10,7 +10,6 @@ desenhados aqui usam apenas caracteres simples.
 
 import cv2
 
-from safetech import config
 from safetech.nucleo.tipos import PessoaObservada, StatusPessoa
 
 
@@ -30,23 +29,20 @@ FONTE = cv2.FONT_HERSHEY_SIMPLEX
 # TEXTO DO RÓTULO
 # ============================================================
 
+# Uma única palavra por status. Com muitas pessoas na imagem, um
+# rótulo comprido cobre o vizinho; o detalhe (quais EPIs faltam) fica
+# na faixa de status, no log de auditoria e no painel web.
+PALAVRA_STATUS = {
+    StatusPessoa.LIBERADO: "OK",
+    StatusPessoa.NEGADO: "NEGADO",
+    StatusPessoa.ANALISANDO: "...",
+}
+
+
 def texto_da_pessoa(pessoa: PessoaObservada) -> str:
-    """Ex.: "#3 OK", "#3 FALTA: CAPACETE, LUVAS" ou "#3 Analisando..."."""
+    """A palavra desenhada junto da caixa: "OK", "NEGADO" ou "..."."""
 
-    if pessoa.status is StatusPessoa.ANALISANDO:
-        return f"#{pessoa.identificador} Analisando..."
-
-    if pessoa.status is StatusPessoa.LIBERADO:
-        return f"#{pessoa.identificador} OK"
-
-    # Modelo antigo: não sabe dizer QUAL equipamento falta
-    if pessoa.faltando == (config.EPI_CONJUNTO,):
-        return f"#{pessoa.identificador} SEM EPI"
-
-    # As CHAVES dos EPIs não têm acento, por isso servem para o vídeo
-    faltando = ", ".join(chave.upper() for chave in pessoa.faltando)
-
-    return f"#{pessoa.identificador} FALTA: {faltando}"
+    return PALAVRA_STATUS[pessoa.status]
 
 
 # ============================================================
@@ -76,49 +72,36 @@ def desenhar_pessoas(imagem_bgr, pessoas, escala=1.0):
 
 
 def desenhar_caixa(imagem_bgr, caixa, texto, cor):
-    """Desenha uma caixa com cantos reforçados e um rótulo acima dela."""
+    """Desenha um contorno fino e uma palavra pequena acima dele."""
 
     x1, y1, x2, y2 = caixa
 
     altura_imagem, largura_imagem = imagem_bgr.shape[:2]
 
-    # Espessuras e fonte proporcionais ao tamanho da imagem, para o
-    # desenho ficar igual em qualquer resolução.
-    base = max(1, round(largura_imagem / 640))
-
-    espessura_fina = base
-    espessura_canto = base * 3
-
-    # ------------------------------------------------------
-    # CAIXA: contorno fino + cantos grossos
-    # ------------------------------------------------------
-
-    cv2.rectangle(imagem_bgr, (x1, y1), (x2, y2), cor, espessura_fina, cv2.LINE_AA)
-
-    canto = max(10, min(x2 - x1, y2 - y1) // 5)
-
-    for x, y, direcao_x, direcao_y in (
-        (x1, y1, 1, 1),
-        (x2, y1, -1, 1),
-        (x1, y2, 1, -1),
-        (x2, y2, -1, -1),
-    ):
-
-        cv2.line(imagem_bgr, (x, y), (x + direcao_x * canto, y), cor, espessura_canto, cv2.LINE_AA)
-        cv2.line(imagem_bgr, (x, y), (x, y + direcao_y * canto), cor, espessura_canto, cv2.LINE_AA)
+    # Medidas proporcionais ao tamanho da imagem, para o desenho ficar
+    # igual em qualquer resolução. O contorno é sempre o mais fino
+    # possível nessa proporção: com muitas pessoas, linhas grossas e
+    # cantos reforçados escondem quem está atrás.
+    base = max(1, round(largura_imagem / 1000))
 
     # ------------------------------------------------------
-    # RÓTULO: fundo colorido + texto branco
+    # CONTORNO
     # ------------------------------------------------------
 
-    tamanho_fonte = 0.5 * max(1.0, largura_imagem / 640)
-    espessura_fonte = max(1, base)
+    cv2.rectangle(imagem_bgr, (x1, y1), (x2, y2), cor, base, cv2.LINE_AA)
+
+    # ------------------------------------------------------
+    # RÓTULO: fundo colorido + palavra em branco
+    # ------------------------------------------------------
+
+    tamanho_fonte = 0.4 * max(1.0, largura_imagem / 800)
+    espessura_fonte = base
 
     (largura_texto, altura_texto), _ = cv2.getTextSize(
         texto, FONTE, tamanho_fonte, espessura_fonte
     )
 
-    margem = 6
+    margem = 3 * base
 
     altura_rotulo = altura_texto + 2 * margem
     largura_rotulo = largura_texto + 2 * margem

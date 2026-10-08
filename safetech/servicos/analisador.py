@@ -46,13 +46,24 @@ class ParametrosAnalise:
     setor: str = config.SETOR_PADRAO
     exigidos: tuple = tuple(config.SETORES[config.SETOR_PADRAO])
 
+    # Como as pessoas são encontradas: config.MODO_ROSTO ou config.MODO_CORPO
+    modo_deteccao: str = config.MODO_DETECCAO_PADRAO
+
 
 class Analisador:
 
-    def __init__(self, camera, detector, classificador, auditoria, parametros):
+    def __init__(self, camera, detectores, classificador, auditoria, parametros):
+        """
+        detectores -> um detector por modo de detecção: {modo: detector}.
+                      Ficam todos carregados, para a troca de modo na
+                      tela ser imediata.
+        """
 
         self._camera = camera
-        self._detector = detector
+        self._detectores = detectores
+
+        # Modo em uso no último ciclo (None = ainda não começou)
+        self._modo_em_uso = None
         self._classificador = classificador
         self._auditoria = auditoria
         self._parametros = parametros
@@ -73,6 +84,9 @@ class Analisador:
 
         self._parar = threading.Event()
         self._thread = None
+
+        # Levantado por reiniciar_pessoas() e atendido pela thread de análise
+        self._pedido_de_reinicio = threading.Event()
 
     # ============================================================
     # CONTROLE
@@ -100,6 +114,21 @@ class Analisador:
         if self._thread is not None:
             self._thread.join(timeout=3)
             self._thread = None
+
+    def reiniciar_pessoas(self):
+        """
+        Faz o sistema esquecer todas as pessoas que está acompanhando.
+
+        Usado quando a auditoria é zerada: quem está na imagem passa a
+        contar como pessoa nova e volta a gerar um evento de ENTRADA,
+        em vez de ficar sem registro no log recém-esvaziado.
+
+        Pode ser chamado de outra thread: só levanta um aviso, e quem
+        de fato esquece as pessoas é a própria thread de análise, no
+        começo do ciclo seguinte.
+        """
+
+        self._pedido_de_reinicio.set()
 
     def estado(self) -> EstadoCena:
         """Último resultado publicado (seguro para ler de outra thread)."""
@@ -136,6 +165,15 @@ class Analisador:
 
             inicio_ciclo = time.perf_counter()
 
+            # Pedido para esquecer todo mundo (a auditoria foi zerada)
+            if self._pedido_de_reinicio.is_set():
+
+                self._pedido_de_reinicio.clear()
+
+                # Rastreador novo: além de esquecer as pessoas, a
+                # numeração recomeça em P001.
+                self._rastreador = RastreadorPessoas()
+
             frame, numero_frame = self._camera.ler()
 
             # ------------------------------------------------------
@@ -166,7 +204,7 @@ class Analisador:
             # 1) DETECTAR  e  2) RASTREAR
             # ------------------------------------------------------
 
-            caixas = self._detector.detectar(frame)
+            caixas = self._detector_do_modo().detectar(frame)
 
             rastros = self._rastreador.atualizar(caixas, inicio_ciclo)
 
@@ -199,8 +237,17 @@ class Analisador:
                 ciclos_no_periodo = 0
                 inicio_periodo = time.perf_counter()
 
+            # O rastreador lembra por alguns segundos de quem sumiu (para
+            # reconhecer a pessoa quando ela voltar), mas na tela só
+            # aparece quem foi visto há bem pouco tempo.
+            na_tela = [
+                rastro
+                for rastro in rastros
+                if inicio_ciclo - rastro.ultimo_visto <= config.TEMPO_MAXIMO_AUSENTE_SEG
+            ]
+
             self._publicar(
-                self._montar_estado(rastros, setor, exigidos, analises_por_segundo)
+                self._montar_estado(na_tela, setor, exigidos, analises_por_segundo)
             )
 
             # Não analisa mais rápido do que o necessário
@@ -208,6 +255,34 @@ class Analisador:
 
             if sobra > 0:
                 self._parar.wait(sobra)
+
+    # ============================================================
+    # 1) DETECÇÃO: ROSTO OU CORPO
+    # ============================================================
+
+    def _detector_do_modo(self):
+        """
+        Devolve o detector do modo escolhido na tela.
+
+        Quando o modo muda, o rastreador recomeça do zero: a caixa de
+        um rosto e a caixa de um corpo inteiro têm tamanhos muito
+        diferentes, então não dá para dizer que uma é "a mesma pessoa"
+        da outra. Quem está na imagem passa a contar como pessoa nova.
+        """
+
+        modo = self._parametros.modo_deteccao
+
+        # Modo pedido sem detector carregado (modelo ausente): continua
+        # no que já estava em uso, ou no primeiro que existir.
+        if modo not in self._detectores:
+            modo = self._modo_em_uso or next(iter(self._detectores))
+
+        if modo != self._modo_em_uso:
+
+            self._modo_em_uso = modo
+            self._rastreador = RastreadorPessoas()
+
+        return self._detectores[modo]
 
     # ============================================================
     # 3) CLASSIFICAÇÃO
@@ -316,7 +391,16 @@ class Analisador:
     # ============================================================
 
     def _auditar_mudancas(self, frame, rastros, setor, exigidos):
-        """Grava um evento para cada pessoa cuja decisão mudou."""
+        """
+        Grava um evento (com UMA foto de evidência) só em dois casos:
+
+            ENTRADA -> primeira decisão sobre uma pessoa nova;
+            MUDANCA -> a decisão dessa pessoa mudou de verdade
+                       (liberado <-> negado).
+
+        Enquanto a pessoa continua na mesma situação, nada é gravado,
+        por mais tempo que ela fique na imagem.
+        """
 
         for rastro in rastros:
 
@@ -331,12 +415,28 @@ class Analisador:
             liberado = pessoa.status is StatusPessoa.LIBERADO
 
             if liberado == rastro.decisao_registrada:
+
+                # Voltou a concordar: a discordância era passageira
+                rastro.confirmacoes_de_mudanca = 0
                 continue
 
             if rastro.decisao_registrada is None:
+
                 evento = modulo_auditoria.EVENTO_ENTRADA
+
             else:
+
+                # Uma mudança só vale depois de se repetir em várias
+                # classificações seguidas. Sem isso, um único resultado
+                # diferente geraria um evento e uma foto a mais.
+                rastro.confirmacoes_de_mudanca += 1
+
+                if rastro.confirmacoes_de_mudanca < config.CONFIRMACOES_PARA_MUDANCA:
+                    continue
+
                 evento = modulo_auditoria.EVENTO_MUDANCA
+
+            rastro.confirmacoes_de_mudanca = 0
 
             # Foto de evidência: o frame inteiro (contexto) com a
             # pessoa em questão destacada. É uma CÓPIA, porque o

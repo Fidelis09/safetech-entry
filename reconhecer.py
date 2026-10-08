@@ -19,7 +19,8 @@ import cv2
 from safetech import config
 from safetech.nucleo import epis
 from safetech.nucleo.classificador import ClassificadorEPI
-from safetech.nucleo.detector import DetectorPessoas
+from safetech.nucleo import detector as fabrica_de_detectores
+from safetech.servicos import preferencias
 
 
 def escolher_imagem():
@@ -66,7 +67,15 @@ def principal():
     print("Carregando a IA...")
 
     classificador = ClassificadorEPI()
-    detector = DetectorPessoas()
+    # Usa o mesmo modo de detecção (rosto ou corpo) escolhido no aplicativo
+    _, _, modo = preferencias.carregar()
+
+    if not fabrica_de_detectores.modo_disponivel(modo):
+        modo = config.MODO_ROSTO
+
+    print("Modo de detecção:", config.MODOS_DETECCAO[modo])
+
+    detector = fabrica_de_detectores.criar_detector(modo)
 
     if not classificador.por_epi:
         print("Aviso: usando o modelo antigo, que só avalia o conjunto completo.")

@@ -25,26 +25,39 @@ class PainelMonitoramento(ttk.Frame):
         self,
         pai,
         epis_do_modelo,
+        modos_disponiveis,
+        modo_inicial,
+        ao_mudar_modo,
         setor_inicial,
         exigidos_iniciais,
         limiar_inicial,
         intervalo_inicial,
         ao_alternar_camera,
         ao_salvar_imagem,
+        ao_enviar_arquivos,
         ao_mudar_parametros,
         ao_mudar_fiscalizacao,
     ):
         """
-        epis_do_modelo -> chaves dos EPIs que o modelo instalado reconhece.
-                          Só eles podem ser exigidos (não dá para fiscalizar
-                          o que o modelo não sabe ver).
+        epis_do_modelo    -> chaves dos EPIs que o modelo instalado reconhece.
+                             Só eles podem ser exigidos (não dá para
+                             fiscalizar o que o modelo não sabe ver).
+        modos_disponiveis -> modos de detecção (rosto / corpo) cujo modelo
+                             está instalado. Os outros ficam desativados.
         """
 
         super().__init__(pai, style="Painel.TFrame", padding=18)
 
         self._epis_do_modelo = set(epis_do_modelo)
 
+        self._modos_disponiveis = set(modos_disponiveis)
+        self._ao_mudar_modo = ao_mudar_modo
+
+        # Modo de detecção selecionado (rosto ou corpo)
+        self._modo = tk.StringVar(value=modo_inicial)
+
         self._ao_salvar_imagem = ao_salvar_imagem
+        self._ao_enviar_arquivos = ao_enviar_arquivos
         self._ao_mudar_parametros = ao_mudar_parametros
         self._ao_mudar_fiscalizacao = ao_mudar_fiscalizacao
 
@@ -175,11 +188,38 @@ class PainelMonitoramento(ttk.Frame):
             textvariable=self._setor,
             values=list(config.SETORES),
             state="readonly",
-            width=24,
+            width=21,
             takefocus=False,
         )
         self._caixa_setor.pack(side="left")
         self._caixa_setor.bind("<<ComboboxSelected>>", self._ao_escolher_setor)
+
+        # --------------------------------------------------
+        # SELETOR DO MODO DE DETECÇÃO (rosto / corpo)
+        # --------------------------------------------------
+        #
+        # Botões lado a lado em que só um fica marcado. Montados da
+        # direita para a esquerda, porque são alinhados à direita.
+        # --------------------------------------------------
+
+        for modo, nome in reversed(list(config.MODOS_DETECCAO.items())):
+
+            botao = ttk.Radiobutton(
+                linha,
+                text=nome,
+                value=modo,
+                variable=self._modo,
+                style="Modo.Toolbutton",
+                command=lambda: self._ao_mudar_modo(self._modo.get()),
+                takefocus=False,
+            )
+            botao.pack(side="right", padx=(2, 0))
+
+            # Modo cujo modelo não foi baixado não pode ser escolhido
+            if modo not in self._modos_disponiveis:
+                botao.state(["disabled"])
+
+        ttk.Label(linha, text="Detectar por", style="Suave.Cartao.TLabel").pack(side="right", padx=(0, 6))
 
         # Os EPIs ficam numa segunda linha, para caberem mesmo com a
         # janela estreita (ou com mais equipamentos cadastrados)
@@ -233,7 +273,7 @@ class PainelMonitoramento(ttk.Frame):
         self._rotulo_limiar = self._criar_deslizante(
             cartao,
             coluna=0,
-            titulo="Confiança mínima",
+            titulo="Confiança mín.",
             variavel=self._limiar,
             minimo=50,
             maximo=99,
@@ -242,7 +282,7 @@ class PainelMonitoramento(ttk.Frame):
         self._rotulo_intervalo = self._criar_deslizante(
             cartao,
             coluna=1,
-            titulo="Intervalo de análise",
+            titulo="Intervalo",
             variavel=self._intervalo,
             minimo=0.3,
             maximo=5.0,
@@ -309,15 +349,21 @@ class PainelMonitoramento(ttk.Frame):
             style="Primario.TButton",
             command=self.salvar_imagem,
             takefocus=False,
+        ).pack(side="right", padx=(8, 0))
+
+        # Aproveita imagens que já existem no computador. Colar uma
+        # imagem copiada (Ctrl+V) faz o mesmo, sem passar pelo botão.
+        ttk.Button(
+            linha,
+            text="Enviar arquivo",
+            style="Secundario.TButton",
+            command=lambda: self._ao_enviar_arquivos(self.rotulos_marcados()),
+            takefocus=False,
         ).pack(side="right", padx=(12, 0))
 
         ttk.Label(
             linha, text="Coleta de imagens", style="Cartao.TLabel", font=FONTES["texto_negrito"]
         ).pack(side="left")
-
-        # Situação do dataset (total e quantas imagens por EPI)
-        self._rotulo_dataset = ttk.Label(linha, text="", style="Suave.Cartao.TLabel")
-        self._rotulo_dataset.pack(side="left", padx=(16, 0))
 
         # Rótulos da próxima imagem: o que a pessoa está usando agora
         linha_epis = ttk.Frame(cartao, style="Cartao.TFrame")
@@ -334,6 +380,11 @@ class PainelMonitoramento(ttk.Frame):
                 style="Cartao.TCheckbutton",
                 takefocus=False,
             ).pack(side="left", padx=(12, 0))
+
+        # Situação do dataset (total e quantas imagens por EPI), numa
+        # linha própria para nunca ser cortada pelos botões
+        self._rotulo_dataset = ttk.Label(cartao, text="", style="Suave.Cartao.TLabel")
+        self._rotulo_dataset.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
     # ============================================================
     # EVENTOS INTERNOS
@@ -406,12 +457,15 @@ class PainelMonitoramento(ttk.Frame):
     # MÉTODOS USADOS PELA JANELA PRINCIPAL
     # ============================================================
 
+    def rotulos_marcados(self):
+        """Chaves dos EPIs marcados em "A pessoa está usando"."""
+
+        return {chave for chave, variavel in self._usando.items() if variavel.get()}
+
     def salvar_imagem(self):
         """Pede à janela principal para salvar o frame com os rótulos marcados."""
 
-        self._ao_salvar_imagem(
-            {chave for chave, variavel in self._usando.items() if variavel.get()}
-        )
+        self._ao_salvar_imagem(self.rotulos_marcados())
 
     def tamanho_do_video(self):
         """(largura, altura) em pixels do espaço disponível para o vídeo."""

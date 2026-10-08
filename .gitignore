@@ -45,3 +45,6 @@ env/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Detector de corpo inteiro (35 MB): baixado à parte, veja o README
+modelos/object_detection_yolox_*.onnx

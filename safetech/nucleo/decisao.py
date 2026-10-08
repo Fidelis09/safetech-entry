@@ -45,9 +45,15 @@ def avaliar_pessoa(historico, epis_do_modelo, exigidos, limiar_confianca):
     if len(historico) < config.AMOSTRAS_MINIMAS_DECISAO:
         return StatusPessoa.ANALISANDO, (), ()
 
-    # A MÉDIA das últimas classificações é bem mais estável do que a
-    # última isolada: um frame borrado não derruba a decisão.
-    probabilidades = np.mean(historico, axis=0)
+    # A decisão usa a MEDIANA das últimas classificações (o valor do
+    # meio, depois de ordenar), e não a última isolada nem a média.
+    #
+    # Por que não a média: uma única classificação muito errada (um
+    # frame borrado, a pessoa de costas) puxa a média inteira e faria a
+    # decisão virar por vários ciclos. A mediana simplesmente ignora um
+    # resultado isolado fora da curva; a decisão só muda quando a
+    # MAIORIA das classificações recentes muda.
+    probabilidades = np.median(historico, axis=0)
 
     itens = tuple(
         ResultadoEPI(

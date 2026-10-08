@@ -41,6 +41,16 @@ URL_MODELO_ROSTO = (
     "face_detection_yunet/face_detection_yunet_2023mar.onnx"
 )
 
+# Detector de corpo inteiro (YOLOX), usado no modo "corpo". O arquivo
+# tem cerca de 35 MB e não vai para o repositório: é baixado à parte.
+# Sem ele o programa funciona normalmente, só com o modo "rosto".
+ARQUIVO_MODELO_CORPO = PASTA_MODELOS / "object_detection_yolox_2022nov.onnx"
+
+URL_MODELO_CORPO = (
+    "https://github.com/opencv/opencv_zoo/raw/main/models/"
+    "object_detection_yolox/object_detection_yolox_2022nov.onnx"
+)
+
 # Imagens de treino do modelo por EPI e a planilha de rótulos, que
 # diz, para cada imagem, quais equipamentos a pessoa está usando.
 PASTA_DATASET = RAIZ / "dataset"
@@ -129,20 +139,80 @@ USAR_DIRECTSHOW = True
 # Resolução pedida à webcam (ela usa a mais próxima que suportar).
 # 640x480 mantém o vídeo fluido em qualquer webcam; resoluções
 # maiores deixam a imagem mais nítida, mas podem derrubar o FPS.
-LARGURA_CAPTURA = 640
-ALTURA_CAPTURA = 480
+#
+# 1280x720 é o indicado para uma câmera geral (várias pessoas, cada
+# uma pequena na imagem): sobra mais detalhe por pessoa para a IA
+# avaliar os equipamentos. Se o vídeo ficar lento, use 640 e 480.
+LARGURA_CAPTURA = 1280
+ALTURA_CAPTURA = 720
 
 
 # ============================================================
 # DETECÇÃO E RASTREAMENTO DE PESSOAS
 # ============================================================
 
-# O detector de rosto roda numa cópia reduzida do frame: é muito
-# mais rápido e, para achar rostos, a precisão é praticamente a mesma.
-LARGURA_DETECCAO = 480
+# O detector de rosto roda em cópias reduzidas do frame, em DUAS
+# escalas, e junta os resultados. Cada escala enxerga uma faixa de
+# tamanho de rosto (medido neste projeto):
+#
+#   640 px -> acha rostos pequenos de uma câmera geral (24 de 24
+#             pessoas em 1280x720), mas não acha um rosto grande e
+#             próximo;
+#   320 px -> acha o rosto próximo (catraca), mas só 7 das 24 pequenas.
+#
+# Com as duas, a mesma configuração serve para os dois usos. Uma
+# terceira escala maior (ex.: 960) acha rostos ainda menores, ao custo
+# de mais tempo por frame.
+LARGURAS_DETECCAO = (640, 320)
+
+# Sobreposição (IoU) acima da qual duas caixas, achadas em escalas
+# diferentes, são consideradas a mesma pessoa.
+IOU_MESMA_PESSOA = 0.4
+
+# Quantos candidatos a rosto o detector mantém antes de eliminar os
+# repetidos. Precisa ser alto: com um valor baixo (era 50) o detector
+# só encontrava parte das pessoas quando havia muita gente na imagem.
+MAXIMO_CANDIDATOS_ROSTO = 5000
 
 # Confiança mínima (0 a 1) para aceitar um rosto detectado
 CONFIANCA_MINIMA_ROSTO = 0.7
+
+# --- Modo de detecção ------------------------------------------
+#
+# Como as pessoas são encontradas na imagem. O usuário alterna na
+# tela, e a escolha fica salva.
+#
+#   "rosto" -> rápido; para catraca (pessoa perto e de frente)
+#   "corpo" -> mais lento; para câmera geral (pessoas de costas, de
+#              lado, andando e se cruzando)
+MODO_ROSTO = "rosto"
+MODO_CORPO = "corpo"
+
+# chave -> nome mostrado na tela
+MODOS_DETECCAO = {
+    MODO_ROSTO: "Rosto",
+    MODO_CORPO: "Corpo",
+}
+
+# Modo usado na primeira vez que o programa abre
+MODO_DETECCAO_PADRAO = MODO_ROSTO
+
+# --- Detector de corpo -----------------------------------------
+
+# Largura da cópia do frame analisada pelo detector de corpo. É o que
+# mais pesa na velocidade (medido nesta máquina: ~150 ms com entrada
+# quadrada de 640, ~70 ms com 416). Maior mantém o detalhe para pessoas
+# pequenas ao fundo. 512 foi o melhor equilíbrio nas fotos reais da
+# obra: achou as mesmas pessoas que 640, em ~77 ms contra ~113 ms.
+LARGURA_DETECCAO_CORPO = 512
+
+# Confiança mínima (0 a 1) para aceitar uma pessoa detectada
+CONFIANCA_MINIMA_CORPO = 0.5
+
+# Sobreposição (IoU) acima da qual duas caixas do detector de corpo
+# são tratadas como a mesma pessoa. Mais alto = separa melhor pessoas
+# coladas uma na outra, mas pode duplicar a mesma pessoa.
+IOU_REPETICAO_CORPO = 0.5
 
 # A caixa do rosto é expandida para cobrir cabeça, tronco e mãos: é
 # onde ficam o capacete, os óculos, o colete e as luvas. Os valores
@@ -157,9 +227,38 @@ MARGEM_INFERIOR_ROSTO = 4.0
 # detectada agora é a mesma pessoa do frame anterior.
 IOU_MINIMO_RASTREIO = 0.2
 
-# Quanto tempo uma pessoa pode "sumir" (detector falhou, virou o
-# rosto) antes de ser esquecida.
+# Por quanto tempo a caixa de uma pessoa continua NA TELA depois que
+# o detector deixa de vê-la (falhou num frame, ela virou o rosto).
 TEMPO_MAXIMO_AUSENTE_SEG = 1.0
+
+# Por quanto tempo uma pessoa que sumiu continua LEMBRADA (número,
+# histórico e decisão). Se ela reaparecer perto de onde estava dentro
+# desse prazo, é reconhecida como a mesma pessoa, sem gerar um novo
+# evento nem uma nova foto de evidência. Numa câmera geral, onde os
+# rostos somem e voltam o tempo todo, é isso que evita as repetições.
+TEMPO_MEMORIA_PESSOA_SEG = 8.0
+
+# Distância máxima entre onde a pessoa estava e onde reapareceu para
+# ser considerada a mesma, medida em "larguras da caixa" dela. O raio
+# começa em BASE e cresce a cada segundo de sumiço (ela pode ter
+# andado), até o limite MAXIMA.
+DISTANCIA_BASE_RASTREIO = 0.5
+DISTANCIA_POR_SEGUNDO_AUSENTE = 0.8
+DISTANCIA_MAXIMA_RASTREIO = 2.5
+
+# --- Previsão de movimento -------------------------------------
+#
+# O rastreador estima a velocidade de cada pessoa e a procura onde
+# ela DEVE estar, não onde estava. Ajuda a acompanhar quem anda e a
+# não trocar duas pessoas que se cruzam.
+
+# Por quanto tempo (segundos) a previsão continua avançando depois
+# que a pessoa deixa de ser detectada. 0 desliga a previsão.
+TEMPO_MAXIMO_PREVISAO_SEG = 1.0
+
+# Quanto a velocidade medida agora pesa sobre a estimada antes (0 a 1).
+# Mais baixo = estimativa mais estável; mais alto = reage mais rápido.
+SUAVIZACAO_VELOCIDADE = 0.4
 
 # Suavização da posição da caixa (0 a 1). Mais alto = acompanha mais
 # rápido; mais baixo = caixa mais estável, sem tremer.
@@ -186,13 +285,19 @@ INTERVALO_CLASSIFICACAO_PADRAO_SEG = 1.0
 # neste intervalo curto, para a decisão sair rápido.
 INTERVALO_CLASSIFICACAO_RAPIDA_SEG = 0.25
 
-# A decisão de cada pessoa usa a MÉDIA das últimas N classificações,
+# A decisão de cada pessoa usa a MEDIANA das últimas N classificações,
 # não só a última. Isso evita o status "piscar" entre liberado e
 # negado por causa de um único frame ruim.
 TAMANHO_HISTORICO_DECISAO = 5
 
 # Quantas classificações são necessárias antes da primeira decisão
 AMOSTRAS_MINIMAS_DECISAO = 2
+
+# Quantas classificações SEGUIDAS precisam discordar da decisão já
+# registrada para a mudança ir para a auditoria (com foto nova). Evita
+# registrar uma oscilação passageira como se a pessoa tivesse tirado
+# ou colocado um equipamento.
+CONFIRMACOES_PARA_MUDANCA = 3
 
 
 # ============================================================

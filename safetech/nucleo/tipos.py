@@ -55,7 +55,7 @@ class ResultadoEPI:
     # True se a confiança passou do limiar: a pessoa ESTÁ usando
     presente: bool
 
-    # Confiança média de que a pessoa está usando, de 0.0 a 1.0
+    # Confiança (mediana das últimas classificações) de que a pessoa está usando, de 0.0 a 1.0
     confianca: float
 
 

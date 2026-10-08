@@ -136,7 +136,30 @@ def aplicar_tema(janela, escala=1.0):
         foreground=[("disabled", CORES["texto_suave"])],
     )
 
+    # Botão secundário para usar DENTRO de um cartão (o botão padrão
+    # tem a mesma cor do cartão e sumiria nele)
+    estilo.configure("Secundario.TButton", background=CORES["borda"], foreground=CORES["texto"])
+
+    estilo.map("Secundario.TButton", background=[("active", CORES["neutro"])])
+
     estilo.configure("Perigo.TButton", background=CORES["perigo"], foreground="white")
+
+    # Versão pequena e discreta, para uma ação que apaga coisas da
+    # tela: fica visível sem chamar mais atenção do que os botões do
+    # dia a dia. Só fica vermelho cheio quando o mouse passa por cima.
+    estilo.configure(
+        "Pequeno.Perigo.TButton",
+        background=CORES["perigo_fundo"],
+        foreground=CORES["perigo_texto"],
+        font=FONTES["pequena"],
+        padding=(10, 5),
+    )
+
+    estilo.map(
+        "Pequeno.Perigo.TButton",
+        background=[("active", CORES["perigo"])],
+        foreground=[("active", "white")],
+    )
 
     estilo.map(
         "Perigo.TButton",
@@ -157,6 +180,26 @@ def aplicar_tema(janela, escala=1.0):
         "Filtro.Toolbutton",
         background=[("selected", CORES["destaque"]), ("active", CORES["cartao_hover"])],
         foreground=[("selected", "white")],
+    )
+
+    # Seletor do modo de detecção (Rosto / Corpo), dentro de um cartão
+    estilo.configure(
+        "Modo.Toolbutton",
+        background=CORES["borda"],
+        foreground=CORES["texto_suave"],
+        font=FONTES["texto_negrito"],
+        padding=(12, 5),
+        relief="flat",
+    )
+
+    estilo.map(
+        "Modo.Toolbutton",
+        background=[
+            ("disabled", CORES["cartao"]),
+            ("selected", CORES["destaque"]),
+            ("active", CORES["neutro"]),
+        ],
+        foreground=[("disabled", CORES["borda"]), ("selected", "white")],
     )
 
     # ------------------------------------------------------

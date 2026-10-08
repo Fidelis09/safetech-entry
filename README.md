@@ -31,7 +31,8 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - **EPIs reconhecidos separadamente**: o modelo dá uma resposta independente para cada equipamento.
 - **Fiscalização por setor**: perfis prontos (cada setor com seus EPIs obrigatórios) e caixas de seleção para ajustar na hora. A última seleção é lembrada ao reabrir o programa.
 - **Várias pessoas ao mesmo tempo** (fila): cada uma recebe uma caixa que a acompanha, com número e o que está faltando.
-- **Decisão estável**: usa a média das últimas classificações de cada pessoa, então o status não fica piscando.
+- **Decisão estável**: usa a mediana das últimas classificações de cada pessoa, então o status não fica piscando.
+- **Uma foto de evidência por pessoa**: outra só é gravada quando a situação dela muda ou quando é outra pessoa.
 - **Status do acesso** em destaque: liberado (verde), negado (vermelho), analisando (laranja) ou aguardando.
 - **Confiança mínima e intervalo de análise** ajustáveis na tela, com efeito imediato.
 - **Auditoria na mesma tela**: indicadores, filtros, busca, ordenação por coluna e foto de evidência do evento selecionado. Cada evento guarda o setor, o que era exigido e o que faltava.
@@ -61,7 +62,8 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 
    | Arquivo | Para que serve | Origem |
    |---|---|---|
-   | `face_detection_yunet_2023mar.onnx` | Localiza as pessoas | Baixado uma vez (já vem no repositório) |
+   | `face_detection_yunet_2023mar.onnx` | Localiza as pessoas pelo rosto (modo rosto) | Baixado uma vez (já vem no repositório) |
+   | `object_detection_yolox_2022nov.onnx` | Localiza as pessoas pelo corpo inteiro (modo corpo) | **Não vem no repositório** (35 MB). Veja [Modo de detecção](#modo-de-detecção-rosto-ou-corpo) |
    | `modelo_epis.keras` e `epis.json` | Modelo **por EPI** | Gerados pelo `treinar.py`, depois de você coletar imagens rotuladas |
    | `modelo_epi.keras` e `classes.json` | Modelo **antigo** (só "com EPI" / "sem EPI") | Já vêm no repositório |
 
@@ -91,8 +93,8 @@ A janela abre na hora, com a mensagem "Carregando o modelo de IA". Quando o bot�
 
 | Área | O que faz |
 |---|---|
-| **Vídeo** | Imagem da webcam com uma caixa por pessoa. Verde = em conformidade (`#1 OK`), vermelho = falta algo (`#2 FALTA: CAPACETE, LUVAS`), cinza = ainda analisando. |
-| **Faixa de status** | Decisão geral da catraca, quem está sem o quê e o que o setor exige. |
+| **Vídeo** | Imagem da câmera com um contorno fino por pessoa e uma única palavra: verde `OK`, vermelho `NEGADO`, cinza `...` (ainda analisando). O contorno é discreto de propósito, para não cobrir ninguém quando há muita gente. |
+| **Faixa de status** | Decisão geral da catraca, quantas pessoas estão irregulares, em quantas falta cada EPI e o que o setor exige. O detalhe por pessoa fica na auditoria. |
 | **Fiscalização** | O setor em fiscalização e os EPIs obrigatórios nele (veja abaixo). |
 | **Confiança mínima** | Confiança necessária para considerar que a pessoa está usando um EPI. Mais alto = mais rigoroso. |
 | **Intervalo de análise** | De quanto em quanto tempo cada pessoa é reclassificada. |
@@ -120,12 +122,35 @@ SETORES = {
 
 O divisor entre os dois painéis pode ser arrastado para dar mais espaço ao vídeo ou à auditoria.
 
+### Modo de detecção: rosto ou corpo
+
+Na área **Fiscalização**, o seletor **Detectar por** define como as pessoas são encontradas na imagem. A troca vale na hora, sem reiniciar o programa nem a câmera, e a escolha fica salva.
+
+| Modo | Quando usar | Como encontra a pessoa | Velocidade |
+|---|---|---|---|
+| **Rosto** | Catraca: pessoa perto da câmera e de frente | Pelo rosto; o recorte cobre cabeça, tronco e mãos | Rápido (cerca de 12 análises por segundo) |
+| **Corpo** | Câmera geral: várias pessoas, de costas, de lado, abaixadas, andando e se cruzando | Pelo corpo inteiro, em qualquer posição | Mais lento (cerca de 8 análises por segundo) |
+
+Numa foto real de um canteiro de obras, o modo rosto encontrou 5 pessoas e o modo corpo, as 7 que estavam visíveis.
+
+O que muda ao trocar de modo:
+
+- **As pessoas são esquecidas e recomeçam.** A caixa de um rosto e a de um corpo inteiro não se correspondem, então quem está na imagem passa a contar como pessoa nova (com um novo evento de entrada na auditoria).
+- **O recorte entregue ao modelo de EPI muda** (cabeça e tronco num modo, corpo inteiro no outro). Para o reconhecimento funcionar bem nos dois, o dataset precisa ter imagens coletadas **nos dois modos**. A coleta e a importação salvam o recorte do modo que estiver selecionado.
+
+O modo corpo depende do arquivo `modelos/object_detection_yolox_2022nov.onnx` (35 MB), que não vai para o repositório. Sem ele, a opção **Corpo** fica desativada. Para baixar (PowerShell, na pasta do projeto):
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/opencv/opencv_zoo/raw/main/models/object_detection_yolox/object_detection_yolox_2022nov.onnx" -OutFile "modelos/object_detection_yolox_2022nov.onnx"
+```
+
 ### Atalhos de teclado
 
 | Tecla | Ação |
 |---|---|
 | `Espaço` | Liga ou desliga a câmera |
-| `S` | Salva uma imagem com os rótulos marcados na área de coleta |
+| `S` | Salva uma imagem da câmera com os rótulos marcados na área de coleta |
+| `Ctrl+V` | Cola no dataset uma imagem copiada (ou arquivos de imagem copiados), com os rótulos marcados |
 | `Esc` | Limpa a busca da auditoria |
 
 Os atalhos ficam desativados enquanto você digita no campo de busca.
@@ -191,7 +216,9 @@ Para restringir o painel a este computador, use `PAINEL_WEB_HOST = "127.0.0.1"`.
 
 O sistema combina dois modelos, cada um com uma função:
 
-1. **Detector de rosto (YuNet)**: encontra ONDE estão as pessoas. A partir de cada rosto, o programa monta uma caixa maior cobrindo cabeça, tronco e mãos, que é onde ficam o capacete, os óculos, o colete e as luvas.
+1. **Detector de pessoas**: encontra ONDE estão as pessoas. Há dois, e o usuário alterna entre eles na tela:
+   - **Rosto (YuNet)**: acha cada rosto e monta uma caixa maior cobrindo cabeça, tronco e mãos, que é onde ficam o capacete, os óculos, o colete e as luvas.
+   - **Corpo (YOLOX)**: uma rede de detecção de objetos, da qual só interessa a classe "pessoa". Acha o corpo inteiro em qualquer posição.
 2. **Classificador de EPI (MobileNetV2)**: recebe o recorte de cada pessoa e devolve **uma probabilidade por equipamento**, cada uma independente das outras:
 
    ```
@@ -223,11 +250,11 @@ Para cada frame da câmera:
            as pessoas    quem        cada um usa?    o setor      decisão mudou
 ```
 
-- **Detectar**: o YuNet roda numa cópia reduzida do frame (mais rápido).
-- **Rastrear**: cada caixa é ligada à pessoa do frame anterior pela sobreposição entre as caixas (IoU). Assim cada pessoa mantém um número fixo (`#1`, `#2`...) e um histórico próprio, mesmo com várias pessoas em fila.
+- **Detectar**: o YuNet roda em duas cópias reduzidas do frame (640 e 320 px de largura) e os resultados são unidos. A maior acha rostos pequenos de uma câmera geral; a menor acha um rosto grande e próximo, como numa catraca. Cada uma sozinha perde o caso da outra.
+- **Rastrear**: cada caixa é ligada à pessoa do frame anterior pela sobreposição entre as caixas (IoU) ou pela proximidade dos centros. Quem some por alguns segundos (virou o rosto, passou atrás de algo) continua **lembrado**: se reaparecer perto de onde estava, é reconhecido como a mesma pessoa, com o mesmo histórico e a mesma decisão.
 - **Classificar**: todas as pessoas são classificadas numa única chamada ao modelo. Isso acontece no intervalo configurado, e mais rápido quando aparece alguém novo.
-- **Decidir**: para cada EPI, usa a **média** das últimas 5 classificações. O EPI conta como "usando" se a média passar da confiança mínima. A pessoa é liberada se estiver usando todos os EPIs exigidos no setor.
-- **Auditar**: um evento é gravado quando sai a primeira decisão de uma pessoa e sempre que essa decisão muda (inclusive por troca de setor).
+- **Decidir**: para cada EPI, usa a **mediana** das últimas 5 classificações (o valor do meio). O EPI conta como "usando" se a mediana passar da confiança mínima. A mediana ignora um resultado isolado fora da curva, que na média bastaria para virar a decisão. A pessoa é liberada se estiver usando todos os EPIs exigidos no setor.
+- **Auditar**: um evento, com **uma** foto de evidência, é gravado em apenas dois casos: na primeira decisão sobre uma pessoa nova, e quando a decisão dela muda de fato (liberado para negado ou o contrário, inclusive por troca de setor). A mudança só é gravada depois de se repetir em 3 classificações seguidas. Enquanto a pessoa continua na mesma situação, nada é gravado.
 
 ### Regra da catraca
 
@@ -271,7 +298,9 @@ Tech_day_26.2/
 │   ├── nucleo/             A "inteligência" (sem tela e sem câmera)
 │   │   ├── tipos.py            Estruturas de dados trocadas entre os módulos
 │   │   ├── epis.py             Quais EPIs o modelo instalado reconhece
-│   │   ├── detector.py         Encontra as pessoas no frame (YuNet)
+│   │   ├── detector.py         Escolhe o detector conforme o modo (rosto ou corpo)
+│   │   ├── detector_rosto.py   Encontra as pessoas pelo rosto (YuNet)
+│   │   ├── detector_corpo.py   Encontra as pessoas pelo corpo inteiro (YOLOX)
 │   │   ├── rastreador.py       Mantém a identidade de cada pessoa
 │   │   ├── classificador.py    Modelo de EPI: uma probabilidade por equipamento
 │   │   ├── decisao.py          Compara o que a pessoa usa com o que o setor exige
@@ -282,6 +311,7 @@ Tech_day_26.2/
 │   │   ├── analisador.py       Linha de análise em thread própria
 │   │   ├── auditoria.py        Log em CSV e fotos de evidência
 │   │   ├── dataset.py          Salva imagens de treino com os rótulos
+│   │   ├── importacao.py       Abre imagens de arquivo ou da área de transferência
 │   │   └── preferencias.py     Lembra o setor e os EPIs selecionados
 │   │
 │   ├── interface/          A janela (Tkinter)
@@ -304,6 +334,7 @@ Tech_day_26.2/
 ├── preferencias.json       Última seleção de setor (gerado pelo programa)
 └── auditoria/              Gerada pelo programa
     ├── log_auditoria.csv
+    ├── arquivados/         Logs e fotos anteriores, movidos pelo botão Zerar
     └── imagens/            Fotos de evidência
 ```
 
@@ -334,6 +365,19 @@ Para o modelo reconhecer cada equipamento separadamente, ele precisa de imagens 
    ```
 
 6. Abra o programa novamente. O modelo por EPI passa a ser usado automaticamente e a área de fiscalização é ativada.
+
+### Usar imagens que já existem
+
+Além da câmera, a área de coleta aceita imagens prontas. Elas recebem os rótulos que estiverem marcados no momento, então **marque primeiro, importe depois**.
+
+| Forma | Como |
+|---|---|
+| **Enviar arquivo** | Botão na área de coleta. Dá para escolher várias imagens de uma vez (todas recebem os mesmos rótulos). |
+| **Colar (`Ctrl+V`)** | Copie uma imagem (captura de tela, "copiar imagem" do navegador) ou copie arquivos de imagem no Explorador de Arquivos, e pressione `Ctrl+V` na janela do programa. |
+
+A importação funciona com a câmera desligada. Cada imagem passa pelo mesmo tratamento da câmera: o detector acha as pessoas e o que é salvo é o recorte de cada uma; se ninguém for encontrado, a imagem inteira é salva. O aviso no rodapé informa quantas imagens entraram, quantos recortes geraram e com quais rótulos. Arquivos que não são imagens são ignorados.
+
+Ao importar imagens da internet, lembre que só servem as que mostram claramente o que a pessoa está ou não usando, e que precisam ser rotuladas com o mesmo cuidado das fotos da câmera.
 
 ### Como montar um bom dataset
 
@@ -391,6 +435,25 @@ O log fica em `auditoria/log_auditoria.csv`, e as fotos em `auditoria/imagens/`.
 
 Cada evento tem uma foto do frame inteiro, com a pessoa em questão destacada.
 
+### Zerar a auditoria
+
+O botão **Zerar**, no cabeçalho do painel de auditoria, recomeça tudo do zero: esvazia a tabela, os indicadores, o log e a pasta de fotos, e faz as pessoas que estão na câmera contarem como novas (a numeração volta a `P001`). O painel web também passa a mostrar zero.
+
+O programa pede confirmação antes. E **nada é apagado**: o log e as fotos são movidos para `auditoria/arquivados/<data e hora>/`. Para liberar espaço em disco de verdade, exclua essa pasta à mão.
+
+### Quando uma foto é gravada
+
+| Situação | Grava? |
+|---|---|
+| Primeira decisão sobre uma pessoa nova | Sim (`ENTRADA`) |
+| A pessoa continua na imagem, na mesma situação | Não |
+| A pessoa some por alguns segundos e volta ao mesmo lugar | Não: é reconhecida como a mesma |
+| Uma classificação isolada diferente das outras | Não: é tratada como oscilação |
+| A situação da pessoa muda de fato (colocou ou tirou um EPI exigido, ou o setor mudou) | Sim (`MUDANCA`) |
+| Outra pessoa aparece | Sim (`ENTRADA`) |
+
+O reconhecimento de "mesma pessoa" é por **posição**, não por identidade. Se alguém some por mais de `TEMPO_MEMORIA_PESSOA_SEG` segundos, ou reaparece longe de onde estava, conta como pessoa nova. E, se duas pessoas se cruzam enquanto uma delas não está sendo detectada, o sistema pode trocar uma pela outra.
+
 O número da pessoa (`P001`, `P002`...) vale enquanto ela permanece na imagem e recomeça a cada vez que o programa é aberto. Não é uma identificação de quem a pessoa é.
 
 Logs de versões anteriores do programa, que tinham outras colunas, não são apagados: são renomeados para `log_auditoria_formato_antigo_<data>.csv`.
@@ -408,14 +471,22 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `SETOR_PADRAO` | `"Acesso geral"` | Setor selecionado na primeira vez que o programa abre |
 | `LIMIAR_CONFIANCA_PADRAO` | `0.80` | Confiança mínima para considerar que a pessoa usa um EPI (valor inicial do controle) |
 | `INTERVALO_CLASSIFICACAO_PADRAO_SEG` | `1.0` | Intervalo de reclassificação (valor inicial do controle) |
-| `TAMANHO_HISTORICO_DECISAO` | `5` | Quantas classificações entram na média da decisão |
+| `TAMANHO_HISTORICO_DECISAO` | `5` | Quantas classificações entram na mediana da decisão |
+| `CONFIRMACOES_PARA_MUDANCA` | `3` | Classificações seguidas necessárias para registrar uma mudança de decisão (com foto nova) |
 | `AMOSTRAS_MINIMAS_DECISAO` | `2` | Classificações necessárias antes da primeira decisão |
 | `INDICE_CAMERA` | `0` | Qual webcam usar |
-| `LARGURA_CAPTURA` / `ALTURA_CAPTURA` | `640` / `480` | Resolução pedida à webcam |
-| `LARGURA_DETECCAO` | `480` | Largura da cópia usada na detecção de rosto |
+| `LARGURA_CAPTURA` / `ALTURA_CAPTURA` | `1280` / `720` | Resolução pedida à câmera. Alta para câmera geral, com várias pessoas pequenas na imagem |
+| `MODO_DETECCAO_PADRAO` | `"rosto"` | Modo de detecção na primeira vez que o programa abre |
+| `LARGURAS_DETECCAO` | `(640, 320)` | Larguras das cópias usadas na detecção de rosto. A maior acha rostos pequenos, a menor acha rostos grandes e próximos |
+| `LARGURA_DETECCAO_CORPO` | `512` | Largura da cópia usada na detecção de corpo. Maior acha pessoas menores, mais lento |
+| `CONFIANCA_MINIMA_CORPO` | `0.5` | Confiança mínima para aceitar uma pessoa no modo corpo |
+| `TEMPO_MAXIMO_PREVISAO_SEG` | `1.0` | Por quanto tempo o rastreador prevê a posição de quem está andando. `0` desliga |
+| `MAXIMO_CANDIDATOS_ROSTO` | `5000` | Candidatos mantidos pelo detector. Valor baixo faz parte das pessoas não ser detectada |
 | `CONFIANCA_MINIMA_ROSTO` | `0.7` | Confiança mínima para aceitar um rosto |
 | `MARGEM_*_ROSTO` | - | Quanto a caixa do rosto é expandida para cobrir tronco e mãos |
-| `TEMPO_MAXIMO_AUSENTE_SEG` | `1.0` | Tempo que uma pessoa pode sumir sem perder o número |
+| `TEMPO_MAXIMO_AUSENTE_SEG` | `1.0` | Por quanto tempo a caixa fica na tela depois que a pessoa deixa de ser detectada |
+| `TEMPO_MEMORIA_PESSOA_SEG` | `8.0` | Por quanto tempo quem sumiu continua lembrado. Maior = menos fotos repetidas, mais risco de confundir duas pessoas |
+| `DISTANCIA_*_RASTREIO` | - | Até que distância de onde sumiu a pessoa ainda é reconhecida como a mesma |
 | `EPOCAS_TREINO` | `15` | Épocas do treinamento |
 | `PAINEL_WEB_ATIVO` | `True` | Liga ou desliga o painel web |
 | `PAINEL_WEB_HOST` | `"0.0.0.0"` | `"0.0.0.0"` = acessível na rede; `"127.0.0.1"` = só neste computador |
@@ -430,7 +501,8 @@ Medições feitas em CPU (sem placa de vídeo), no computador de desenvolvimento
 
 | Etapa | Tempo |
 |---|---|
-| Detecção de rosto por frame | cerca de 8 ms |
+| Detecção de rosto por frame (duas escalas) | cerca de 30 ms |
+| Detecção de corpo por frame (entrada de 512 px) | cerca de 77 ms |
 | Classificação de 1 pessoa | cerca de 24 ms |
 | Classificação de 3 pessoas (uma chamada) | cerca de 50 ms |
 | Mesma classificação com `modelo.predict()` | cerca de 224 ms |
@@ -459,7 +531,10 @@ O tempo de abertura do modelo depende do TensorFlow: alguns segundos normalmente
 | **Luvas nunca são reconhecidas** | As mãos precisam aparecer dentro da caixa da pessoa. Afaste-se um pouco da câmera ou aumente `MARGEM_INFERIOR_ROSTO`. |
 | **"Não foi possível acessar a webcam"** | Feche outros programas que usem a câmera (Teams, Zoom, navegador). Se houver mais de uma câmera, mude `INDICE_CAMERA`. |
 | **Aviso "Detector de rosto não encontrado"** | Baixe o arquivo `.onnx` (veja [Instalação](#instalação)). Sem ele o programa funciona, mas trata a cena inteira como uma pessoa. |
-| **Vídeo lento** | Mantenha `LARGURA_CAPTURA`/`ALTURA_CAPTURA` em 640x480 e aumente o intervalo de análise na tela. |
+| **Vídeo lento** | Reduza `LARGURA_CAPTURA`/`ALTURA_CAPTURA` para 640 e 480 e aumente o intervalo de análise na tela. |
+| **Nem todas as pessoas são detectadas** | Se elas estão de costas, de lado ou se cruzando, mude para o modo **Corpo**. No modo rosto, o rosto precisa estar visível e não muito pequeno: acrescente uma escala maior em `LARGURAS_DETECCAO` (por exemplo, `(960, 640, 320)`) ou aproxime a câmera. |
+| **Fotos de evidência repetidas da mesma pessoa** | O detector está perdendo a pessoa por mais tempo do que a memória do rastreador. Aumente `TEMPO_MEMORIA_PESSOA_SEG`. |
+| **Duas pessoas diferentes contadas como uma** | O contrário: diminua `TEMPO_MEMORIA_PESSOA_SEG` ou `DISTANCIA_MAXIMA_RASTREIO`. |
 | **A caixa não aparece** | O detector precisa ver o rosto. Fique de frente para a câmera, com boa iluminação. |
 | **Status errado com frequência** | O dataset é pequeno. Colete mais imagens e treine de novo. |
 | **"Painel web indisponível (porta 8080 em uso)"** | Outro programa usa a porta, ou o `painel_web.py` está aberto. Feche-o ou mude `PAINEL_WEB_PORTA`. |
@@ -473,7 +548,9 @@ O tempo de abertura do modelo depende do TensorFlow: alguns segundos normalmente
 
 Limitações conhecidas:
 
-- **A pessoa é localizada pelo rosto.** De costas ou com o rosto muito coberto, ela pode não ser detectada.
+- **No modo rosto, a pessoa é localizada pelo rosto.** De costas ou com o rosto muito coberto, ela não é detectada; para isso existe o modo corpo.
+- **No modo corpo, quem está quase todo encoberto por outra pessoa pode não ser detectado**, e a análise é mais lenta.
+- **O modelo de EPI precisa de imagens dos dois modos** para funcionar bem em ambos, porque o recorte de cada um é diferente.
 - **O modelo por EPI precisa ser treinado por você.** O repositório traz só o modelo antigo; a fiscalização por equipamento depende de coletar imagens rotuladas e treinar.
 - **O modelo olha o recorte inteiro da pessoa, reduzido para 224x224.** Itens pequenos, como óculos e luvas, são os mais difíceis e os que mais dependem de um dataset grande e variado.
 - **As mãos precisam estar visíveis** para as luvas serem avaliadas. Mãos fora da imagem ou atrás do corpo contam como "sem luvas".
@@ -485,7 +562,6 @@ Próximos passos possíveis:
 
 - Confirmação por voz da Ordem de Serviço (etapa futura do desafio).
 - Um detector de objetos (que localiza cada equipamento na imagem), mais preciso para itens pequenos como óculos e luvas.
-- Detector de corpo inteiro, para não depender do rosto.
 - Edição dos setores pela própria tela, sem mexer no `config.py`.
 - Integração com uma catraca real (acionamento por relé ou porta serial).
 - Exportação de relatórios da auditoria por período.

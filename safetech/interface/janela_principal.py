@@ -19,7 +19,7 @@ import threading
 import time
 import webbrowser
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
 
 import cv2
 from PIL import Image, ImageTk
@@ -29,9 +29,9 @@ from safetech.interface import tema
 from safetech.interface.painel_auditoria import PainelAuditoria
 from safetech.interface.painel_monitoramento import PainelMonitoramento
 from safetech.interface.tema import CORES
-from safetech.nucleo import anotacao, epis
+from safetech.nucleo import anotacao, detector, epis
 from safetech.nucleo.tipos import EstadoCena, StatusAcesso, StatusPessoa
-from safetech.servicos import preferencias
+from safetech.servicos import importacao, preferencias
 from safetech.servicos.analisador import Analisador, ParametrosAnalise
 from safetech.servicos.auditoria import ServicoAuditoria
 from safetech.servicos.camera import Camera, EstadoCamera
@@ -39,7 +39,7 @@ from safetech.servicos.dataset import ColetorDataset
 from safetech.web.servidor import ServidorWeb
 
 
-TEXTO_ATALHOS = "Espaço: ligar/desligar câmera   |   S: salvar imagem rotulada   |   Esc: limpar busca"
+TEXTO_ATALHOS = "Espaço: câmera   |   S: salvar imagem   |   Ctrl+V: colar imagem   |   Esc: limpar busca"
 
 
 class JanelaPrincipal:
@@ -65,12 +65,27 @@ class JanelaPrincipal:
 
         # Fiscalização: reabre com o setor e os EPIs da última vez. Só
         # pode ser exigido o que o modelo sabe reconhecer.
-        setor, exigidos = preferencias.carregar()
+        setor, exigidos, modo_deteccao = preferencias.carregar()
+
+        # Modos de detecção cujo modelo está na pasta (o modo corpo
+        # depende de um arquivo baixado à parte)
+        self._modos_disponiveis = [
+            modo for modo in config.MODOS_DETECCAO if detector.modo_disponivel(modo)
+        ]
+
+        # Se o modo salvo não estiver mais disponível, volta para o rosto
+        if modo_deteccao not in self._modos_disponiveis:
+            modo_deteccao = config.MODO_ROSTO
 
         self._parametros = ParametrosAnalise(
             setor=setor,
             exigidos=tuple(chave for chave in exigidos if chave in self._epis_do_modelo),
+            modo_deteccao=modo_deteccao,
         )
+
+        # Detectores usados só para importar imagens, um por modo
+        # (cada um é criado no primeiro uso)
+        self._detectores_importacao = {}
 
         # Criados quando a IA terminar de carregar
         self._analisador = None
@@ -153,12 +168,16 @@ class JanelaPrincipal:
         self._painel_monitoramento = PainelMonitoramento(
             divisor,
             epis_do_modelo=self._epis_do_modelo,
+            modos_disponiveis=self._modos_disponiveis,
+            modo_inicial=self._parametros.modo_deteccao,
+            ao_mudar_modo=self._mudar_modo_deteccao,
             setor_inicial=self._parametros.setor,
             exigidos_iniciais=self._parametros.exigidos,
             limiar_inicial=self._parametros.limiar_confianca,
             intervalo_inicial=self._parametros.intervalo_classificacao,
             ao_alternar_camera=self._alternar_camera,
             ao_salvar_imagem=self._salvar_imagem,
+            ao_enviar_arquivos=self._enviar_arquivos,
             ao_mudar_parametros=self._mudar_parametros,
             ao_mudar_fiscalizacao=self._mudar_fiscalizacao,
         )
@@ -166,6 +185,7 @@ class JanelaPrincipal:
         self._painel_auditoria = PainelAuditoria(
             divisor,
             pasta_imagens=self._auditoria.pasta_imagens,
+            ao_zerar=self._zerar_auditoria,
             escala=self._escala,
         )
 
@@ -196,6 +216,11 @@ class JanelaPrincipal:
         # S (maiúsculo ou minúsculo) salva uma imagem com os rótulos marcados
         for tecla in ("s", "S"):
             self._raiz.bind_all(tecla, self._atalho(self._painel_monitoramento.salvar_imagem))
+
+        # Ctrl+V cola no dataset uma imagem copiada. Enquanto o usuário
+        # digita na busca, Ctrl+V continua colando TEXTO ali, como esperado.
+        for tecla in ("<Control-v>", "<Control-V>"):
+            self._raiz.bind_all(tecla, self._atalho(self._colar_imagem))
 
     def _atalho(self, acao):
         """Embrulha uma ação de atalho: ela não dispara enquanto o usuário digita na busca."""
@@ -271,9 +296,10 @@ class JanelaPrincipal:
             # Importados aqui, e não no topo do arquivo, porque trazem
             # o TensorFlow junto: é o que mais demora no programa.
             from safetech.nucleo.classificador import ClassificadorEPI
-            from safetech.nucleo.detector import DetectorPessoas
 
-            self._resultado_carga = ("ok", ClassificadorEPI(), DetectorPessoas())
+            # Os detectores dos dois modos ficam carregados desde já,
+            # para a troca entre rosto e corpo na tela ser imediata.
+            self._resultado_carga = ("ok", ClassificadorEPI(), detector.criar_detectores())
 
         except Exception as erro:
             self._resultado_carga = ("erro", str(erro))
@@ -304,11 +330,11 @@ class JanelaPrincipal:
                 segundos=15,
             )
 
-        _, classificador, detector = self._resultado_carga
+        _, classificador, detectores = self._resultado_carga
 
         self._analisador = Analisador(
             self._camera,
-            detector,
+            detectores,
             classificador,
             self._auditoria,
             self._parametros,
@@ -316,7 +342,7 @@ class JanelaPrincipal:
 
         self._analisador.iniciar()
 
-        if not detector.disponivel:
+        if not detectores[config.MODO_ROSTO].disponivel:
 
             self._avisar(
                 "Detector de rosto não encontrado em 'modelos/': a cena inteira será "
@@ -487,16 +513,24 @@ class JanelaPrincipal:
 
         if estado.acesso is StatusAcesso.NEGADO:
 
-            # Diz QUEM está sem O QUÊ, ex.: "#2 sem Capacete, Luvas"
-            pendencias = "   |   ".join(
-                f"#{pessoa.identificador} sem {epis.nomes_dos_epis(pessoa.faltando)}"
-                for pessoa in estado.pessoas
+            negadas = [
+                pessoa for pessoa in estado.pessoas
                 if pessoa.status is StatusPessoa.NEGADO
+            ]
+
+            # Com várias pessoas, listar uma por uma não cabe na faixa.
+            # O resumo diz quantas estão irregulares e, para cada EPI
+            # exigido, em quantas pessoas ele falta. O detalhe por
+            # pessoa fica no log de auditoria, com a foto.
+            faltas = ",  ".join(
+                f"{epis.nome_do_epi(chave)} ({quantidade})"
+                for chave in estado.exigidos
+                if (quantidade := sum(1 for pessoa in negadas if chave in pessoa.faltando))
             )
 
             return (
                 "ACESSO NEGADO",
-                f"{pendencias}\n{exigencia}",
+                f"{len(negadas)} de {total} {plural} sem EPI exigido. Faltando: {faltas}\n{exigencia}",
                 CORES["perigo"],
             )
 
@@ -588,10 +622,45 @@ class JanelaPrincipal:
         self._parametros.setor = setor
         self._parametros.exigidos = tuple(exigidos)
 
-        preferencias.salvar(setor, exigidos)
+        self._salvar_preferencias()
 
         # O texto da faixa de status depende do setor
         self._ultimo_status = None
+
+    def _mudar_modo_deteccao(self, modo):
+        """
+        Chamado quando o usuário alterna entre "Rosto" e "Corpo".
+
+        A troca vale já no próximo ciclo de análise, sem reiniciar o
+        programa nem a câmera. As pessoas que estavam sendo
+        acompanhadas são esquecidas (o analisador cuida disso), porque
+        a caixa de um modo não corresponde à do outro.
+        """
+
+        self._parametros.modo_deteccao = modo
+
+        self._salvar_preferencias()
+
+        if modo == config.MODO_CORPO:
+            self._avisar(
+                "Modo corpo: acha pessoas de costas, de lado e se cruzando. "
+                "A análise fica mais lenta.",
+                segundos=7,
+            )
+        else:
+            self._avisar(
+                "Modo rosto: rápido, para pessoas perto da câmera e de frente.",
+                segundos=7,
+            )
+
+    def _salvar_preferencias(self):
+        """Grava setor, EPIs exigidos e modo de detecção para a próxima abertura."""
+
+        preferencias.salvar(
+            self._parametros.setor,
+            self._parametros.exigidos,
+            self._parametros.modo_deteccao,
+        )
 
     def _salvar_imagem(self, usando):
         """
@@ -620,6 +689,154 @@ class JanelaPrincipal:
         rotulos = epis.nomes_dos_epis(chave for chave in config.EPIS if chave in usando)
 
         self._avisar(f"{descricao}, rotulada como usando: {rotulos or 'nenhum EPI'}.")
+
+    # ------------------------------------------------------
+    # ZERAR A AUDITORIA
+    # ------------------------------------------------------
+
+    def _zerar_auditoria(self):
+        """
+        Botão "Zerar": esvazia o log e as fotos de evidência e recomeça
+        a contagem. Pede confirmação, porque é um registro de auditoria.
+        """
+
+        confirmou = messagebox.askyesno(
+            "Zerar a auditoria",
+            "Zerar o log de auditoria e as fotos de evidência?\n\n"
+            "A tela volta ao zero e as pessoas na câmera passam a contar "
+            "como novas.\n\n"
+            "Nada é apagado: os dados atuais vão para a pasta "
+            "'auditoria/arquivados'.",
+            icon="warning",
+            default="no",
+            parent=self._raiz,
+        )
+
+        if not confirmou:
+            return
+
+        try:
+            destino, eventos, fotos = self._auditoria.zerar()
+
+        except OSError as erro:
+
+            # Ex.: o CSV ou uma foto está aberto em outro programa
+            self._avisar(f"Não foi possível zerar: {erro}", segundos=10)
+            return
+
+        self._painel_auditoria.esvaziar()
+
+        if self._analisador is not None:
+
+            # Eventos que o analisador gravou e a tela ainda não mostrou
+            # pertencem ao log antigo: não devem reaparecer na tabela.
+            fila = self._analisador.registros_novos
+
+            while not fila.empty():
+                fila.get_nowait()
+
+            # Quem está na câmera volta a gerar um evento de entrada
+            self._analisador.reiniciar_pessoas()
+
+        if destino is None:
+            self._avisar("A auditoria já estava vazia.")
+        else:
+            self._avisar(
+                f"Auditoria zerada: {eventos} evento(s) e {fotos} foto(s) "
+                f"arquivados em auditoria/arquivados/{destino.name}.",
+                segundos=8,
+            )
+
+    # ------------------------------------------------------
+    # IMPORTAÇÃO DE IMAGENS (arquivo ou Ctrl+V)
+    # ------------------------------------------------------
+
+    def _enviar_arquivos(self, usando):
+        """Botão "Enviar arquivo": escolhe uma ou mais imagens do computador."""
+
+        caminhos = filedialog.askopenfilenames(
+            parent=self._raiz,
+            title="Escolha as imagens para o dataset",
+            filetypes=[
+                ("Imagens", importacao.EXTENSOES),
+                ("Todos os arquivos", "*.*"),
+            ],
+        )
+
+        if not caminhos:
+            return
+
+        imagens = [importacao.abrir_arquivo(caminho) for caminho in caminhos]
+
+        lidas = [imagem for imagem in imagens if imagem is not None]
+
+        self._importar_imagens(lidas, len(imagens) - len(lidas), usando)
+
+    def _colar_imagem(self):
+        """Ctrl+V: importa a imagem (ou os arquivos de imagem) copiados."""
+
+        imagens, falhas = importacao.ler_area_de_transferencia()
+
+        if not imagens and not falhas:
+            self._avisar("Nada para colar: copie uma imagem (ou um arquivo de imagem) primeiro.")
+            return
+
+        self._importar_imagens(
+            imagens,
+            falhas,
+            self._painel_monitoramento.rotulos_marcados(),
+        )
+
+    def _importar_imagens(self, imagens, falhas, usando):
+        """
+        Grava no dataset imagens vindas de fora da câmera.
+
+        Elas recebem o mesmo tratamento da captura: o detector acha as
+        pessoas e o que é salvo é o recorte de cada uma (ou a imagem
+        inteira, se ninguém for encontrado), com os rótulos marcados.
+        """
+
+        # Detector próprio da importação, criado só quando necessário.
+        # O detector da linha de análise roda em outra thread e não
+        # pode ser usado por duas ao mesmo tempo.
+        #
+        # Usa o MESMO modo da tela (rosto ou corpo): assim as imagens
+        # importadas ficam com o mesmo enquadramento das capturadas
+        # pela câmera naquele modo.
+        modo = self._parametros.modo_deteccao
+
+        if modo not in self._detectores_importacao:
+            self._detectores_importacao[modo] = detector.criar_detector(modo)
+
+        detector_importacao = self._detectores_importacao[modo]
+
+        recortes = 0
+
+        for imagem in imagens:
+
+            caixas = detector_importacao.detectar(imagem)
+
+            recortes += len(self._coletor.salvar(imagem, caixas, usando))
+
+        self._atualizar_resumo_dataset()
+
+        partes = []
+
+        if imagens:
+
+            rotulos = epis.nomes_dos_epis(chave for chave in config.EPIS if chave in usando)
+
+            quantidade = "1 imagem importada" if len(imagens) == 1 else f"{len(imagens)} imagens importadas"
+
+            partes.append(
+                f"{quantidade} ({recortes} recorte(s) de pessoa), "
+                f"rotulada(s) como usando: {rotulos or 'nenhum EPI'}."
+            )
+
+        if falhas:
+            partes.append(f"{falhas} arquivo(s) não são imagens legíveis e foram ignorados.")
+
+        self._avisar(" ".join(partes), segundos=7)
 
     def _atualizar_resumo_dataset(self):
 

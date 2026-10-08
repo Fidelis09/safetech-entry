@@ -40,10 +40,11 @@ ALTURA_EVIDENCIA = 190
 
 class PainelAuditoria(ttk.Frame):
 
-    def __init__(self, pai, pasta_imagens, escala=1.0):
+    def __init__(self, pai, pasta_imagens, ao_zerar, escala=1.0):
 
         super().__init__(pai, style="Painel.TFrame", padding=18)
 
+        self._ao_zerar = ao_zerar
         self._pasta_imagens = pasta_imagens
         self._escala = escala
         self._altura_evidencia = int(ALTURA_EVIDENCIA * escala)
@@ -90,6 +91,16 @@ class PainelAuditoria(ttk.Frame):
             command=self._abrir_pasta,
             takefocus=False,
         ).pack(side="right")
+
+        # Botão pequeno para começar do zero. Quem confirma com o
+        # usuário e arquiva os dados é a janela principal.
+        ttk.Button(
+            cabecalho,
+            text="Zerar",
+            style="Pequeno.Perigo.TButton",
+            command=self._ao_zerar,
+            takefocus=False,
+        ).pack(side="right", padx=(0, 8))
 
     def _montar_indicadores(self):
 
@@ -260,6 +271,17 @@ class PainelAuditoria(ttk.Frame):
             if len(linhas) > config.MAXIMO_LINHAS_TABELA:
                 self._remover_linha(linhas[-1])
 
+    def esvaziar(self):
+        """Tira tudo da tela: tabela, indicadores e a foto de evidência."""
+
+        self.carregar([])
+
+        self._rotulo_detalhes.config(text="")
+
+        self._mostrar_texto_evidencia(
+            "Selecione um evento para ver a foto. Duplo clique abre em tamanho real."
+        )
+
     def limpar_filtro(self):
 
         self._texto_filtro.set("")
@@ -404,14 +426,17 @@ class PainelAuditoria(ttk.Frame):
 
         try:
 
-            imagem = Image.open(caminho)
-
             # Reduz para caber no cartão, mantendo a proporção
             largura_maxima = max(100, self._rotulo_evidencia.winfo_width() - 8)
 
-            imagem.thumbnail((largura_maxima, self._altura_evidencia))
+            # O "with" fecha o arquivo assim que a miniatura fica
+            # pronta. Sem isso o Windows manteria a foto "em uso" e o
+            # botão Zerar não conseguiria movê-la para o arquivo.
+            with Image.open(caminho) as imagem:
 
-            self._imagem_evidencia = ImageTk.PhotoImage(imagem)
+                imagem.thumbnail((largura_maxima, self._altura_evidencia))
+
+                self._imagem_evidencia = ImageTk.PhotoImage(imagem)
 
         except OSError:
             self._mostrar_texto_evidencia("Não foi possível abrir a foto de evidência.")

@@ -193,6 +193,11 @@ class Camera:
             captura.release()
             return None
 
+        # Pede vídeo comprimido (MJPG). Sem isso, muitas webcams só
+        # entregam poucos quadros por segundo em resoluções altas.
+        # Câmeras que não suportam simplesmente ignoram o pedido.
+        captura.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+
         captura.set(cv2.CAP_PROP_FRAME_WIDTH, config.LARGURA_CAPTURA)
         captura.set(cv2.CAP_PROP_FRAME_HEIGHT, config.ALTURA_CAPTURA)
 
