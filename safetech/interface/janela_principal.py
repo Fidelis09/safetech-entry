@@ -31,7 +31,7 @@ from safetech.interface.painel_monitoramento import PainelMonitoramento
 from safetech.interface.tema import CORES
 from safetech.nucleo import anotacao, detector, epis
 from safetech.nucleo.tipos import EstadoCena, StatusAcesso, StatusPessoa
-from safetech.servicos import importacao, preferencias
+from safetech.servicos import busca_cameras, importacao, preferencias
 from safetech.servicos.analisador import Analisador, ParametrosAnalise
 from safetech.servicos.auditoria import ServicoAuditoria
 from safetech.servicos.camera import Camera, EstadoCamera
@@ -54,7 +54,11 @@ class JanelaPrincipal:
         # ------------------------------------------------------
 
         # A câmera pode ser trocada por outra fonte de frames (testes)
-        self._camera = camera if camera is not None else Camera()
+        self._camera = camera if camera is not None else Camera(preferencias.carregar_indice_camera())
+
+        # Índices das câmeras achados pela busca (thread em segundo
+        # plano); a interface os lê no ciclo e preenche a lista.
+        self._cameras_encontradas = None
 
         self._auditoria = ServicoAuditoria()
         self._coletor = ColetorDataset()
@@ -132,6 +136,11 @@ class JanelaPrincipal:
 
         threading.Thread(target=self._carregar_ia, name="carga-ia", daemon=True).start()
 
+        # Procura as câmeras para a caixa de seleção (só com a câmera
+        # real: uma câmera falsa de teste não tem o que procurar)
+        if camera is None:
+            busca_cameras.procurar_em_segundo_plano(self._guardar_cameras_encontradas)
+
         self._ciclo()
 
     # ============================================================
@@ -180,6 +189,8 @@ class JanelaPrincipal:
             ao_enviar_arquivos=self._enviar_arquivos,
             ao_mudar_parametros=self._mudar_parametros,
             ao_mudar_fiscalizacao=self._mudar_fiscalizacao,
+            indice_camera_inicial=getattr(self._camera, "indice", config.INDICE_CAMERA),
+            ao_escolher_camera=self._escolher_camera,
         )
 
         self._painel_auditoria = PainelAuditoria(
@@ -361,6 +372,11 @@ class JanelaPrincipal:
     def _ciclo(self):
 
         try:
+
+            if self._cameras_encontradas is not None:
+
+                self._painel_monitoramento.definir_cameras(self._cameras_encontradas)
+                self._cameras_encontradas = None
 
             self._verificar_carga()
 
@@ -603,6 +619,29 @@ class JanelaPrincipal:
 
         elif estado is EstadoCamera.ATIVA:
             self._camera.parar()
+
+    def _guardar_cameras_encontradas(self, indices):
+        """Chamado pela thread da busca; a interface preenche a lista no próximo ciclo."""
+
+        self._cameras_encontradas = indices
+
+    def _escolher_camera(self, indice):
+        """
+        Chamado quando o usuário escolhe outra câmera na lista.
+
+        Se a câmera estava ligada, a nova liga sozinha; se estava
+        parada, só fica escolhida para o próximo "Iniciar câmera".
+        """
+
+        self._camera.trocar_indice(indice)
+
+        preferencias.salvar_indice_camera(indice)
+
+        # Faz o vídeo e o botão refletirem o novo estado da câmera
+        self._ultimo_estado_camera = None
+        self._ultimo_desenho = None
+
+        self._avisar(f"Câmera {indice} selecionada.")
 
     def _mudar_parametros(self, limiar_confianca, intervalo_classificacao):
         """Chamado quando o usuário move um controle deslizante."""

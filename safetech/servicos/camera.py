@@ -85,6 +85,33 @@ class Camera:
             if self._estado is not EstadoCamera.ERRO:
                 self._estado = EstadoCamera.PARADA
 
+    @property
+    def indice(self) -> int:
+
+        return self._indice
+
+    def trocar_indice(self, indice):
+        """
+        Passa a usar outra câmera. Se a atual estava ligada, desliga e
+        liga a nova; se estava parada, só guarda a escolha.
+        """
+
+        if indice == self._indice:
+            return
+
+        estava_ligada = self._thread is not None and self._thread.is_alive()
+
+        self.parar()
+
+        self._indice = indice
+
+        # Um erro da câmera antiga não vale para a nova
+        with self._trava:
+            self._estado = EstadoCamera.PARADA
+
+        if estava_ligada:
+            self.iniciar()
+
     # ============================================================
     # LEITURA (chamada por outras threads)
     # ============================================================

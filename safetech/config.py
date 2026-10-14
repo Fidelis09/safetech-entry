@@ -129,8 +129,15 @@ CLASSE_LIBERA_ACESSO = "com_epi"
 # CÂMERA
 # ============================================================
 
-# 0 = webcam padrão do computador
+# Câmera usada na primeira abertura (0 = webcam padrão do computador).
+# Depois disso vale a câmera escolhida na caixa de seleção da tela,
+# que fica salva em preferencias.json.
 INDICE_CAMERA = 1
+
+# Quantos índices (0, 1, 2...) o programa testa ao procurar câmeras para
+# a caixa de seleção. Aumente se você tiver muitas câmeras conectadas;
+# diminuir deixa a busca inicial mais rápida.
+MAXIMO_CAMERAS_PROCURADAS = 5
 
 # No Windows o backend DirectShow abre a webcam bem mais rápido
 # que o backend padrão (MSMF).
@@ -338,7 +345,7 @@ PAINEL_WEB_PORTA = 8080
 # não deve ficar aberto na rede: TROQUE A SENHA antes de usar de verdade.
 # Senha vazia ("") desliga o login.
 PAINEL_WEB_USUARIO = "gerente"
-PAINEL_WEB_SENHA = "safetech"
+PAINEL_WEB_SENHA = "1234"
 
 # Quantos eventos (os mais recentes) o painel web lista
 PAINEL_WEB_MAXIMO_EVENTOS = 300
@@ -349,7 +356,20 @@ PAINEL_WEB_MAXIMO_EVENTOS = 300
 # ============================================================
 
 LOTE_TREINO = 32
-EPOCAS_TREINO = 15
+
+# Máximo de épocas. O treino pode parar antes (ver PACIENCIA_TREINO):
+# 15 épocas se mostraram poucas, o erro ainda estava caindo no fim.
+EPOCAS_TREINO = 40
+
+# Se o erro na validação não melhorar por este número de épocas seguidas,
+# o treino para e o modelo volta ao melhor momento. Evita treinar além
+# do ponto em que a rede começa a decorar as imagens.
+PACIENCIA_TREINO = 8
+
+# True = erros em "usando" e em "sem usar" pesam de forma equilibrada em
+# cada EPI, mesmo que um dos casos tenha bem menos imagens. Sem isso, a
+# rede aprende a apostar sempre no caso mais comum (ex.: "tem capacete").
+BALANCEAR_CLASSES = True
 FRACAO_VALIDACAO = 0.20
 SEMENTE_TREINO = 123
 TAXA_APRENDIZADO = 0.001

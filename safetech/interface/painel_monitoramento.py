@@ -37,6 +37,8 @@ class PainelMonitoramento(ttk.Frame):
         ao_enviar_arquivos,
         ao_mudar_parametros,
         ao_mudar_fiscalizacao,
+        indice_camera_inicial,
+        ao_escolher_camera,
     ):
         """
         epis_do_modelo    -> chaves dos EPIs que o modelo instalado reconhece.
@@ -60,6 +62,13 @@ class PainelMonitoramento(ttk.Frame):
         self._ao_enviar_arquivos = ao_enviar_arquivos
         self._ao_mudar_parametros = ao_mudar_parametros
         self._ao_mudar_fiscalizacao = ao_mudar_fiscalizacao
+
+        # Câmera: a lista é preenchida quando a busca termina; até lá
+        # só existe a câmera em uso.
+        self._ao_escolher_camera = ao_escolher_camera
+        self._indice_camera = indice_camera_inicial
+        self._nome_da_camera = tk.StringVar(value=self._nome_camera(indice_camera_inicial))
+        self._indices_da_lista = [indice_camera_inicial]
 
         # Variáveis ligadas aos controles deslizantes
         self._limiar = tk.DoubleVar(value=limiar_inicial * 100)
@@ -103,6 +112,21 @@ class PainelMonitoramento(ttk.Frame):
         ttk.Label(
             cabecalho, text="Monitoramento", style="Titulo.Painel.TLabel"
         ).pack(side="left")
+
+        # Escolha da câmera, logo acima do vídeo. "readonly": só dá
+        # para escolher da lista de câmeras encontradas.
+        ttk.Label(cabecalho, text="Câmera", style="Suave.Painel.TLabel").pack(side="left", padx=(20, 0))
+
+        self._caixa_camera = ttk.Combobox(
+            cabecalho,
+            textvariable=self._nome_da_camera,
+            values=[self._nome_camera(self._indice_camera)],
+            state="readonly",
+            width=12,
+            takefocus=False,
+        )
+        self._caixa_camera.pack(side="left", padx=(8, 0))
+        self._caixa_camera.bind("<<ComboboxSelected>>", self._ao_escolher_camera_na_lista)
 
         # Indicadores de desempenho (câmera / análise), à direita
         self._rotulo_desempenho = ttk.Label(
@@ -397,6 +421,27 @@ class PainelMonitoramento(ttk.Frame):
         self._tela.coords(self._item_imagem, *centro)
         self._tela.coords(self._item_mensagem, *centro)
 
+    @staticmethod
+    def _nome_camera(indice):
+        """Texto mostrado na lista. O OpenCV só informa o índice, não o nome da câmera."""
+
+        return f"Câmera {indice}"
+
+    def _ao_escolher_camera_na_lista(self, _evento=None):
+
+        # Tira a seleção azul do texto, que o Tkinter deixa na caixa
+        self._caixa_camera.selection_clear()
+
+        indice = self._caixa_camera.current()
+
+        if indice < 0:
+            return
+
+        # O texto é "Câmera N": o índice vem do próprio item escolhido
+        self._indice_camera = self._indices_da_lista[indice]
+
+        self._ao_escolher_camera(self._indice_camera)
+
     def _ao_mover_deslizante(self, _valor=None):
 
         self._atualizar_rotulos_parametros()
@@ -503,6 +548,15 @@ class PainelMonitoramento(ttk.Frame):
             text=texto,
             style=estilo,
             state="normal" if habilitado else "disabled",
+        )
+
+    def definir_cameras(self, indices):
+        """Preenche a lista com as câmeras encontradas (a câmera em uso sempre aparece)."""
+
+        self._indices_da_lista = sorted(set(indices) | {self._indice_camera})
+
+        self._caixa_camera.config(
+            values=[self._nome_camera(indice) for indice in self._indices_da_lista]
         )
 
     def definir_desempenho(self, texto):

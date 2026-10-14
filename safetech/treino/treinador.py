@@ -172,7 +172,56 @@ def separar_dataset(caminhos, rotulos):
 # 3) MONTAGEM DA REDE
 # ============================================================
 
-def construir_modelo(quantidade_epis):
+def calcular_pesos_das_classes(rotulos):
+    """
+    Devolve (peso_usando, peso_sem_usar): um peso por EPI para cada caso.
+
+    O caso menos frequente recebe o peso maior, de modo que "usando" e
+    "sem usar" contribuam igual para o erro de cada EPI. Um EPI com
+    metade das imagens em cada caso fica com peso 1 nos dois.
+    """
+
+    total = len(rotulos)
+
+    usando = rotulos.sum(axis=0)
+    sem_usar = total - usando
+
+    return total / (2 * usando), total / (2 * sem_usar)
+
+
+def criar_perda_ponderada(peso_usando, peso_sem_usar):
+    """
+    Entropia cruzada binária em que cada caso de cada EPI tem seu peso.
+
+    O class_weight do Keras não atende saídas multirrótulo (uma por EPI),
+    por isso o peso é aplicado aqui, dentro da própria perda.
+    """
+
+    peso_usando = tf.constant(peso_usando, dtype=tf.float32)
+    peso_sem_usar = tf.constant(peso_sem_usar, dtype=tf.float32)
+
+    def perda_ponderada(esperado, previsto):
+
+        esperado = tf.cast(esperado, tf.float32)
+
+        # Evita log(0)
+        previsto = tf.clip_by_value(previsto, 1e-7, 1 - 1e-7)
+
+        erro = -(
+            peso_usando * esperado * tf.math.log(previsto)
+            + peso_sem_usar * (1 - esperado) * tf.math.log(1 - previsto)
+        )
+
+        return tf.reduce_mean(erro, axis=-1)
+
+    return perda_ponderada
+
+
+def construir_modelo(quantidade_epis, pesos_das_classes=None):
+    """
+    pesos_das_classes -> (peso_usando, peso_sem_usar) de
+                         calcular_pesos_das_classes; None = sem balanceamento.
+    """
 
     largura, altura = config.TAMANHO_IMAGEM
 
@@ -245,11 +294,16 @@ def construir_modelo(quantidade_epis):
 
     modelo = tf.keras.Model(inputs=entrada, outputs=saida)
 
+    # binary_crossentropy trata cada saída como uma pergunta de sim ou
+    # não separada, que é exatamente o nosso caso
+    if pesos_das_classes is None:
+        perda = "binary_crossentropy"
+    else:
+        perda = criar_perda_ponderada(*pesos_das_classes)
+
     modelo.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=config.TAXA_APRENDIZADO),
-        # binary_crossentropy trata cada saída como uma pergunta de
-        # sim ou não separada, que é exatamente o nosso caso
-        loss="binary_crossentropy",
+        loss=perda,
         metrics=["binary_accuracy"],
     )
 
@@ -338,7 +392,9 @@ def executar():
     print("Na primeira execução pode ser necessário baixar os pesos da rede.")
     print()
 
-    modelo = construir_modelo(len(config.EPIS))
+    pesos = calcular_pesos_das_classes(rotulos) if config.BALANCEAR_CLASSES else None
+
+    modelo = construir_modelo(len(config.EPIS), pesos)
 
     modelo.summary()
 
@@ -346,9 +402,22 @@ def executar():
     # 4) TREINAMENTO
     # ------------------------------------------------------
 
-    _titulo(f"TREINANDO ({config.EPOCAS_TREINO} épocas)")
+    _titulo(f"TREINANDO (até {config.EPOCAS_TREINO} épocas)")
 
-    modelo.fit(treino, validation_data=validacao, epochs=config.EPOCAS_TREINO)
+    # Para quando o erro na validação para de melhorar e devolve o
+    # modelo ao melhor momento, não ao da última época.
+    parada_antecipada = tf.keras.callbacks.EarlyStopping(
+        monitor="val_loss",
+        patience=config.PACIENCIA_TREINO,
+        restore_best_weights=True,
+    )
+
+    modelo.fit(
+        treino,
+        validation_data=validacao,
+        epochs=config.EPOCAS_TREINO,
+        callbacks=[parada_antecipada],
+    )
 
     # ------------------------------------------------------
     # 5) AVALIAÇÃO

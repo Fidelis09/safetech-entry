@@ -51,22 +51,65 @@ def carregar(arquivo=config.ARQUIVO_PREFERENCIAS):
     return setor, exigidos, modo_deteccao
 
 
-def salvar(setor, exigidos, modo_deteccao, arquivo=config.ARQUIVO_PREFERENCIAS):
-    """Grava a seleção atual. Falhar ao gravar não deve travar o programa."""
+def _ler_dados(arquivo):
+    """Conteúdo atual do arquivo como dicionário ({} se não existir ou for inválido)."""
+
+    try:
+
+        with open(arquivo, "r", encoding="utf-8") as origem:
+            dados = json.load(origem)
+
+    except (OSError, ValueError):
+        return {}
+
+    return dados if isinstance(dados, dict) else {}
+
+
+def _gravar_dados(dados, arquivo):
+    """Grava o dicionário. Falhar ao gravar não deve travar o programa."""
 
     try:
 
         with open(arquivo, "w", encoding="utf-8") as destino:
-            json.dump(
-                {
-                    "setor": setor,
-                    "exigidos": list(exigidos),
-                    "modo_deteccao": modo_deteccao,
-                },
-                destino,
-                ensure_ascii=False,
-                indent=4,
-            )
+            json.dump(dados, destino, ensure_ascii=False, indent=4)
 
     except OSError:
         pass
+
+
+def salvar(setor, exigidos, modo_deteccao, arquivo=config.ARQUIVO_PREFERENCIAS):
+    """Grava a seleção atual, mantendo os outros itens (como a câmera)."""
+
+    dados = _ler_dados(arquivo)
+
+    dados.update(
+        {
+            "setor": setor,
+            "exigidos": list(exigidos),
+            "modo_deteccao": modo_deteccao,
+        }
+    )
+
+    _gravar_dados(dados, arquivo)
+
+
+def carregar_indice_camera(arquivo=config.ARQUIVO_PREFERENCIAS):
+    """Índice da câmera escolhida na última vez (ou o padrão de config.py)."""
+
+    indice = _ler_dados(arquivo).get("indice_camera")
+
+    # bool é subclasse de int; não vale como índice
+    if isinstance(indice, int) and not isinstance(indice, bool) and indice >= 0:
+        return indice
+
+    return config.INDICE_CAMERA
+
+
+def salvar_indice_camera(indice, arquivo=config.ARQUIVO_PREFERENCIAS):
+    """Grava a câmera escolhida, mantendo o resto das preferências."""
+
+    dados = _ler_dados(arquivo)
+
+    dados["indice_camera"] = indice
+
+    _gravar_dados(dados, arquivo)
