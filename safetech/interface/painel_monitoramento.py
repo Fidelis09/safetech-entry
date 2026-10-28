@@ -19,6 +19,13 @@ from safetech.interface.tema import CORES, FONTES
 from safetech.nucleo.epis import nome_do_epi
 
 
+# Último item da lista de câmeras: não é uma câmera, é a ação de
+# cadastrar uma nova. Um objeto próprio, para nunca ser confundido
+# com o número de uma webcam ou com um endereço.
+OPCAO_ADICIONAR_IP = object()
+TEXTO_ADICIONAR_IP = "+ Adicionar câmera IP..."
+
+
 class PainelMonitoramento(ttk.Frame):
 
     def __init__(
@@ -37,8 +44,11 @@ class PainelMonitoramento(ttk.Frame):
         ao_enviar_arquivos,
         ao_mudar_parametros,
         ao_mudar_fiscalizacao,
-        indice_camera_inicial,
+        fonte_camera_inicial,
+        cameras_ip_iniciais,
         ao_escolher_camera,
+        ao_adicionar_camera_ip,
+        ao_remover_camera_ip,
     ):
         """
         epis_do_modelo    -> chaves dos EPIs que o modelo instalado reconhece.
@@ -46,6 +56,9 @@ class PainelMonitoramento(ttk.Frame):
                              fiscalizar o que o modelo não sabe ver).
         modos_disponiveis -> modos de detecção (rosto / corpo) cujo modelo
                              está instalado. Os outros ficam desativados.
+        fonte_camera_inicial -> câmera em uso: número (webcam) ou
+                             endereço (câmera IP).
+        cameras_ip_iniciais -> câmeras IP cadastradas: lista de (nome, endereço).
         """
 
         super().__init__(pai, style="Painel.TFrame", padding=18)
@@ -63,12 +76,30 @@ class PainelMonitoramento(ttk.Frame):
         self._ao_mudar_parametros = ao_mudar_parametros
         self._ao_mudar_fiscalizacao = ao_mudar_fiscalizacao
 
-        # Câmera: a lista é preenchida quando a busca termina; até lá
-        # só existe a câmera em uso.
+        # Câmeras: as webcams são achadas por uma busca em segundo
+        # plano (até ela terminar, só aparece a câmera em uso); as
+        # câmeras IP vêm das preferências.
         self._ao_escolher_camera = ao_escolher_camera
-        self._indice_camera = indice_camera_inicial
-        self._nome_da_camera = tk.StringVar(value=self._nome_camera(indice_camera_inicial))
-        self._indices_da_lista = [indice_camera_inicial]
+        self._ao_adicionar_camera_ip = ao_adicionar_camera_ip
+        self._ao_remover_camera_ip = ao_remover_camera_ip
+
+        self._fonte_camera = fonte_camera_inicial
+        self._webcams = []
+
+        # Última webcam usada: fica sempre na lista, para dar para
+        # voltar a ela mesmo antes de a busca terminar (ou se a busca
+        # não achar nenhuma).
+        if isinstance(fonte_camera_inicial, int):
+            self._webcam_lembrada = fonte_camera_inicial
+        else:
+            self._webcam_lembrada = config.INDICE_CAMERA
+        self._cameras_ip = list(cameras_ip_iniciais)
+
+        # Fonte de cada item da lista, na mesma ordem dos textos
+        # (o último item é a opção "Adicionar câmera IP...")
+        self._fontes_da_lista = []
+
+        self._nome_da_camera = tk.StringVar()
 
         # Variáveis ligadas aos controles deslizantes
         self._limiar = tk.DoubleVar(value=limiar_inicial * 100)
@@ -120,13 +151,24 @@ class PainelMonitoramento(ttk.Frame):
         self._caixa_camera = ttk.Combobox(
             cabecalho,
             textvariable=self._nome_da_camera,
-            values=[self._nome_camera(self._indice_camera)],
             state="readonly",
-            width=12,
+            width=22,
             takefocus=False,
         )
         self._caixa_camera.pack(side="left", padx=(8, 0))
         self._caixa_camera.bind("<<ComboboxSelected>>", self._ao_escolher_camera_na_lista)
+
+        # Remove a câmera IP selecionada da lista. Só aparece quando
+        # a câmera em uso é uma câmera IP (webcam não se remove).
+        self._botao_remover_ip = ttk.Button(
+            cabecalho,
+            text="Remover",
+            style="Pequeno.Perigo.TButton",
+            command=lambda: self._ao_remover_camera_ip(self._fonte_camera),
+            takefocus=False,
+        )
+
+        self._atualizar_lista_cameras()
 
         # Indicadores de desempenho (câmera / análise), à direita
         self._rotulo_desempenho = ttk.Label(
@@ -421,26 +463,85 @@ class PainelMonitoramento(ttk.Frame):
         self._tela.coords(self._item_imagem, *centro)
         self._tela.coords(self._item_mensagem, *centro)
 
-    @staticmethod
-    def _nome_camera(indice):
-        """Texto mostrado na lista. O OpenCV só informa o índice, não o nome da câmera."""
+    def nome_camera(self, fonte):
+        """
+        Texto mostrado na lista para uma câmera.
 
-        return f"Câmera {indice}"
+        Webcam: "Câmera N" (o OpenCV só informa o número, não o nome).
+        Câmera IP: o nome dado pelo usuário. O endereço nunca aparece,
+        porque pode conter a senha da câmera.
+        """
+
+        if isinstance(fonte, int):
+            return f"Câmera {fonte}"
+
+        for nome, endereco in self._cameras_ip:
+            if endereco == fonte:
+                return f"{nome} (IP)"
+
+        return "Câmera IP"
+
+    @property
+    def webcam_lembrada(self) -> int:
+        """Última webcam usada (para onde voltar quando uma câmera IP é removida)."""
+
+        return self._webcam_lembrada
+
+    def _atualizar_lista_cameras(self):
+        """Refaz a lista: webcams, depois câmeras IP, e por último a opção de adicionar."""
+
+        if isinstance(self._fonte_camera, int):
+            self._webcam_lembrada = self._fonte_camera
+
+        webcams = set(self._webcams) | {self._webcam_lembrada}
+
+        self._fontes_da_lista = (
+            sorted(webcams)
+            + [endereco for _, endereco in self._cameras_ip]
+            + [OPCAO_ADICIONAR_IP]
+        )
+
+        self._caixa_camera.config(
+            values=[
+                TEXTO_ADICIONAR_IP if fonte is OPCAO_ADICIONAR_IP else self.nome_camera(fonte)
+                for fonte in self._fontes_da_lista
+            ]
+        )
+
+        self._nome_da_camera.set(self.nome_camera(self._fonte_camera))
+
+        # "Remover" só faz sentido para câmera IP
+        if isinstance(self._fonte_camera, str):
+            self._botao_remover_ip.pack(side="left", padx=(6, 0), after=self._caixa_camera)
+        else:
+            self._botao_remover_ip.pack_forget()
 
     def _ao_escolher_camera_na_lista(self, _evento=None):
 
         # Tira a seleção azul do texto, que o Tkinter deixa na caixa
         self._caixa_camera.selection_clear()
 
-        indice = self._caixa_camera.current()
+        posicao = self._caixa_camera.current()
 
-        if indice < 0:
+        if posicao < 0:
             return
 
-        # O texto é "Câmera N": o índice vem do próprio item escolhido
-        self._indice_camera = self._indices_da_lista[indice]
+        fonte = self._fontes_da_lista[posicao]
 
-        self._ao_escolher_camera(self._indice_camera)
+        if fonte is OPCAO_ADICIONAR_IP:
+
+            # A caixa volta a mostrar a câmera em uso; se o usuário
+            # adicionar uma câmera, a janela principal a seleciona.
+            self._nome_da_camera.set(self.nome_camera(self._fonte_camera))
+
+            self._ao_adicionar_camera_ip()
+            return
+
+        self._fonte_camera = fonte
+
+        self._atualizar_lista_cameras()
+
+        self._ao_escolher_camera(fonte)
 
     def _ao_mover_deslizante(self, _valor=None):
 
@@ -551,13 +652,22 @@ class PainelMonitoramento(ttk.Frame):
         )
 
     def definir_cameras(self, indices):
-        """Preenche a lista com as câmeras encontradas (a câmera em uso sempre aparece)."""
+        """Preenche a lista com as webcams encontradas pela busca."""
 
-        self._indices_da_lista = sorted(set(indices) | {self._indice_camera})
+        self._webcams = list(indices)
 
-        self._caixa_camera.config(
-            values=[self._nome_camera(indice) for indice in self._indices_da_lista]
-        )
+        self._atualizar_lista_cameras()
+
+    def definir_cameras_ip(self, cameras_ip, fonte_em_uso):
+        """
+        Atualiza as câmeras IP da lista e qual câmera está em uso.
+        Chamado pela janela principal depois de adicionar ou remover uma.
+        """
+
+        self._cameras_ip = list(cameras_ip)
+        self._fonte_camera = fonte_em_uso
+
+        self._atualizar_lista_cameras()
 
     def definir_desempenho(self, texto):
 

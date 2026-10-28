@@ -65,6 +65,19 @@ PASTA_AUDITORIA = RAIZ / "auditoria"
 ARQUIVO_LOG_AUDITORIA = PASTA_AUDITORIA / "log_auditoria.csv"
 PASTA_IMAGENS_AUDITORIA = PASTA_AUDITORIA / "imagens"
 
+# Linhas excluídas da tabela de auditoria. Excluir não apaga: a linha
+# vai para um CSV à parte (com a data da exclusão) e a foto vai junto,
+# para a pasta de imagens dos excluídos.
+PASTA_EXCLUIDOS = PASTA_AUDITORIA / "excluidos"
+
+# Relatórios do botão "Salvar relatório" da auditoria: uma pasta por
+# relatório, com o relatório em HTML e a cópia da foto do evento.
+PASTA_RELATORIOS = PASTA_AUDITORIA / "relatorios"
+
+# Largura máxima (em pixels) da página e da foto no relatório HTML.
+# A foto em tamanho real fica na pasta; isto só limita a exibição.
+LARGURA_FOTO_RELATORIO = 960
+
 
 # ============================================================
 # EQUIPAMENTOS (EPIs) E SETORES
@@ -152,6 +165,37 @@ USAR_DIRECTSHOW = True
 # avaliar os equipamentos. Se o vídeo ficar lento, use 640 e 480.
 LARGURA_CAPTURA = 1280
 ALTURA_CAPTURA = 720
+
+
+# ============================================================
+# CÂMERA IP (pela rede)
+# ============================================================
+#
+# Além das webcams, o programa abre câmeras pela rede, adicionadas na
+# tela ("Adicionar câmera IP..." na lista de câmeras). O endereço é
+# do tipo rtsp://... (câmeras de segurança) ou http://... (câmeras
+# simples e apps de celular como o "IP Webcam").
+#
+# A resolução de uma câmera IP é definida na própria câmera, não aqui.
+# Prefira o "substream" (stream de qualidade menor): a IA não precisa
+# de 4K e a análise fica mais rápida.
+# ============================================================
+
+# Tempo máximo esperando a câmera responder ao conectar. Sem limite,
+# um endereço errado deixaria o programa "Conectando..." para sempre.
+TEMPO_LIMITE_CONEXAO_IP_MS = 8000
+
+# Tempo máximo esperando um frame depois de conectado. Passou disso,
+# a conexão é considerada perdida e o programa tenta reconectar.
+TEMPO_LIMITE_LEITURA_IP_MS = 5000
+
+# Espera entre duas tentativas de reconexão quando a rede cai.
+INTERVALO_RECONEXAO_IP_SEG = 3.0
+
+# Vídeo RTSP por TCP em vez de UDP: um pouco mais de atraso, mas sem
+# imagens cinzas ou borradas quando a rede perde pacotes (UDP não
+# reenvia o que se perdeu).
+RTSP_POR_TCP = True
 
 
 # ============================================================

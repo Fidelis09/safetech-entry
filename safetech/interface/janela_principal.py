@@ -26,15 +26,16 @@ from PIL import Image, ImageTk
 
 from safetech import config
 from safetech.interface import tema
+from safetech.interface.dialogo_camera_ip import pedir_camera_ip
 from safetech.interface.painel_auditoria import PainelAuditoria
 from safetech.interface.painel_monitoramento import PainelMonitoramento
 from safetech.interface.tema import CORES
 from safetech.nucleo import anotacao, detector, epis
 from safetech.nucleo.tipos import EstadoCena, StatusAcesso, StatusPessoa
-from safetech.servicos import busca_cameras, importacao, preferencias
+from safetech.servicos import busca_cameras, importacao, preferencias, relatorio
 from safetech.servicos.analisador import Analisador, ParametrosAnalise
 from safetech.servicos.auditoria import ServicoAuditoria
-from safetech.servicos.camera import Camera, EstadoCamera
+from safetech.servicos.camera import Camera, EstadoCamera, eh_endereco_ip
 from safetech.servicos.dataset import ColetorDataset
 from safetech.web.servidor import ServidorWeb
 
@@ -54,7 +55,8 @@ class JanelaPrincipal:
         # ------------------------------------------------------
 
         # A câmera pode ser trocada por outra fonte de frames (testes)
-        self._camera = camera if camera is not None else Camera(preferencias.carregar_indice_camera())
+        # A câmera pode ser uma webcam (número) ou uma câmera IP (endereço)
+        self._camera = camera if camera is not None else Camera(preferencias.carregar_fonte_camera())
 
         # Índices das câmeras achados pela busca (thread em segundo
         # plano); a interface os lê no ciclo e preenche a lista.
@@ -189,14 +191,19 @@ class JanelaPrincipal:
             ao_enviar_arquivos=self._enviar_arquivos,
             ao_mudar_parametros=self._mudar_parametros,
             ao_mudar_fiscalizacao=self._mudar_fiscalizacao,
-            indice_camera_inicial=getattr(self._camera, "indice", config.INDICE_CAMERA),
+            fonte_camera_inicial=getattr(self._camera, "fonte", config.INDICE_CAMERA),
+            cameras_ip_iniciais=preferencias.carregar_cameras_ip(),
             ao_escolher_camera=self._escolher_camera,
+            ao_adicionar_camera_ip=self._adicionar_camera_ip,
+            ao_remover_camera_ip=self._remover_camera_ip,
         )
 
         self._painel_auditoria = PainelAuditoria(
             divisor,
             pasta_imagens=self._auditoria.pasta_imagens,
             ao_zerar=self._zerar_auditoria,
+            ao_excluir=self._excluir_evento,
+            ao_salvar_relatorio=self._salvar_relatorio,
             escala=self._escala,
         )
 
@@ -417,15 +424,36 @@ class JanelaPrincipal:
         elif estado is EstadoCamera.ABRINDO:
 
             painel.definir_botao_camera("Abrindo...", "Primario.TButton", False)
-            painel.mostrar_mensagem("Abrindo a câmera...")
+
+            if self._camera_e_ip():
+                painel.mostrar_mensagem("Conectando à câmera IP...")
+            else:
+                painel.mostrar_mensagem("Abrindo a câmera...")
+
+        elif estado is EstadoCamera.RECONECTANDO:
+
+            # Câmera IP que caiu: a própria câmera tenta voltar sozinha
+            painel.definir_botao_camera("Parar câmera", "Perigo.TButton")
+            painel.mostrar_mensagem(
+                "A conexão com a câmera IP caiu.\n"
+                "Tentando reconectar..."
+            )
 
         elif estado is EstadoCamera.ERRO:
 
             painel.definir_botao_camera("Tentar novamente", "Primario.TButton")
-            painel.mostrar_mensagem(
-                "Não foi possível acessar a webcam.\n"
-                "Verifique se ela está conectada e se outro programa não a está usando."
-            )
+
+            if self._camera_e_ip():
+                painel.mostrar_mensagem(
+                    "Não foi possível conectar à câmera IP.\n"
+                    "Confira o endereço, o usuário e a senha, e se a câmera\n"
+                    "está ligada e na mesma rede que este computador."
+                )
+            else:
+                painel.mostrar_mensagem(
+                    "Não foi possível acessar a webcam.\n"
+                    "Verifique se ela está conectada e se outro programa não a está usando."
+                )
 
         else:
 
@@ -492,6 +520,9 @@ class JanelaPrincipal:
 
         if self._analisador.erro:
             status = ("ERRO NA ANÁLISE", self._analisador.erro, CORES["perigo"])
+
+        elif self._camera.estado is EstadoCamera.RECONECTANDO:
+            status = ("RECONECTANDO", "A conexão com a câmera IP caiu. Tentando de novo...", CORES["alerta"])
 
         elif self._camera.estado is not EstadoCamera.ATIVA:
             status = ("CÂMERA DESLIGADA", "Ligue a câmera para iniciar o monitoramento.", CORES["neutro"])
@@ -617,7 +648,7 @@ class JanelaPrincipal:
         if estado in (EstadoCamera.PARADA, EstadoCamera.ERRO):
             self._camera.iniciar()
 
-        elif estado is EstadoCamera.ATIVA:
+        elif estado in (EstadoCamera.ATIVA, EstadoCamera.RECONECTANDO):
             self._camera.parar()
 
     def _guardar_cameras_encontradas(self, indices):
@@ -625,23 +656,98 @@ class JanelaPrincipal:
 
         self._cameras_encontradas = indices
 
-    def _escolher_camera(self, indice):
+    def _escolher_camera(self, fonte):
         """
         Chamado quando o usuário escolhe outra câmera na lista.
+
+        fonte -> número da webcam ou endereço da câmera IP.
 
         Se a câmera estava ligada, a nova liga sozinha; se estava
         parada, só fica escolhida para o próximo "Iniciar câmera".
         """
 
-        self._camera.trocar_indice(indice)
+        self._camera.trocar_fonte(fonte)
 
-        preferencias.salvar_indice_camera(indice)
+        preferencias.salvar_fonte_camera(fonte)
 
         # Faz o vídeo e o botão refletirem o novo estado da câmera
         self._ultimo_estado_camera = None
         self._ultimo_desenho = None
 
-        self._avisar(f"Câmera {indice} selecionada.")
+        # Pelo nome, nunca pelo endereço (que pode ter a senha)
+        self._avisar(f"{self._painel_monitoramento.nome_camera(fonte)} selecionada.")
+
+    def _camera_e_ip(self) -> bool:
+
+        return eh_endereco_ip(getattr(self._camera, "fonte", None))
+
+    # ------------------------------------------------------
+    # CÂMERAS IP: ADICIONAR E REMOVER
+    # ------------------------------------------------------
+
+    def _adicionar_camera_ip(self):
+        """
+        Opção "+ Adicionar câmera IP..." da lista: pede nome e endereço,
+        salva a câmera e já passa a usá-la.
+        """
+
+        cameras = preferencias.carregar_cameras_ip()
+
+        resposta = pedir_camera_ip(self._raiz, f"Câmera IP {len(cameras) + 1}")
+
+        if resposta is None:
+            return
+
+        nome, endereco = resposta
+
+        # O mesmo endereço não entra duas vezes: só é selecionado
+        if endereco not in [existente for _, existente in cameras]:
+
+            cameras.append((nome, endereco))
+
+            preferencias.salvar_cameras_ip(cameras)
+
+        self._painel_monitoramento.definir_cameras_ip(cameras, endereco)
+
+        self._escolher_camera(endereco)
+
+        # Já liga a câmera nova, para o usuário ver na hora se conectou
+        if self._analisador is not None and self._camera.estado is EstadoCamera.PARADA:
+            self._camera.iniciar()
+
+    def _remover_camera_ip(self, endereco):
+        """Botão "Remover" ao lado da lista: tira a câmera IP do cadastro."""
+
+        nome = self._painel_monitoramento.nome_camera(endereco)
+
+        confirmou = messagebox.askyesno(
+            "Remover câmera IP",
+            f"Remover {nome} da lista de câmeras?\n\n"
+            "O programa volta a usar a webcam.",
+            default="no",
+            parent=self._raiz,
+        )
+
+        if not confirmou:
+            return
+
+        cameras = [
+            (nome_camera, existente)
+            for nome_camera, existente in preferencias.carregar_cameras_ip()
+            if existente != endereco
+        ]
+
+        preferencias.salvar_cameras_ip(cameras)
+
+        # Se era a câmera em uso, volta para a última webcam usada
+        if self._camera.fonte == endereco:
+            fonte = self._painel_monitoramento.webcam_lembrada
+        else:
+            fonte = self._camera.fonte
+
+        self._painel_monitoramento.definir_cameras_ip(cameras, fonte)
+
+        self._escolher_camera(fonte)
 
     def _mudar_parametros(self, limiar_confianca, intervalo_classificacao):
         """Chamado quando o usuário move um controle deslizante."""
@@ -730,6 +836,42 @@ class JanelaPrincipal:
         self._avisar(f"{descricao}, rotulada como usando: {rotulos or 'nenhum EPI'}.")
 
     # ------------------------------------------------------
+    # RELATÓRIO DO MOMENTO
+    # ------------------------------------------------------
+
+    def _salvar_relatorio(self, registro):
+        """
+        Botão "Salvar relatório" da auditoria: grava um relatório
+        completo do momento da linha selecionada e o abre no navegador.
+
+        Além do evento escolhido, o relatório lista os outros eventos
+        registrados no mesmo instante (mesmo segundo), para mostrar o
+        momento inteiro, e não só uma pessoa.
+        """
+
+        mesmo_momento = [
+            outro
+            for outro in self._auditoria.carregar_historico()
+            if outro.timestamp == registro.timestamp and outro != registro
+        ]
+
+        try:
+
+            pasta = relatorio.salvar(
+                registro,
+                self._auditoria.pasta_imagens,
+                outros_do_momento=mesmo_momento,
+            )
+
+        except OSError as erro:
+            self._avisar(f"Não foi possível salvar o relatório: {erro}", segundos=10)
+            return
+
+        self._avisar(f"Relatório salvo em auditoria/relatorios/{pasta.name}.", segundos=8)
+
+        webbrowser.open((pasta / "relatorio.html").as_uri())
+
+    # ------------------------------------------------------
     # ZERAR A AUDITORIA
     # ------------------------------------------------------
 
@@ -785,6 +927,53 @@ class JanelaPrincipal:
                 f"arquivados em auditoria/arquivados/{destino.name}.",
                 segundos=8,
             )
+
+    # ------------------------------------------------------
+    # EXCLUIR UMA LINHA DA AUDITORIA
+    # ------------------------------------------------------
+
+    def _excluir_evento(self, registro):
+        """
+        Botão "Excluir linha": tira um evento da tabela e do log.
+
+        Pede confirmação. Nada é apagado: a linha e a foto vão para
+        'auditoria/excluidos' (o serviço de auditoria cuida disso).
+        """
+
+        resultado = "liberado" if registro.liberado == "SIM" else "negado"
+
+        confirmou = messagebox.askyesno(
+            "Excluir evento",
+            f"Excluir o evento de {registro.pessoa} ({resultado}) "
+            f"de {registro.timestamp}?\n\n"
+            "Ele sai da tabela, do log e do painel web.\n\n"
+            "Nada é apagado: a linha e a foto vão para a pasta "
+            "'auditoria/excluidos'.",
+            icon="warning",
+            default="no",
+            parent=self._raiz,
+        )
+
+        if not confirmou:
+            return
+
+        try:
+            excluido = self._auditoria.excluir(registro)
+
+        except OSError as erro:
+
+            # Ex.: o CSV está aberto no Excel
+            self._avisar(f"Não foi possível excluir: {erro}", segundos=10)
+            return
+
+        # Some da tela de qualquer jeito: se não estava mais no log
+        # (ex.: a auditoria foi zerada), também não deve aparecer.
+        self._painel_auditoria.remover(registro)
+
+        if excluido:
+            self._avisar(f"Evento de {registro.pessoa} excluído e guardado em auditoria/excluidos.")
+        else:
+            self._avisar("Esse evento não estava mais no log.")
 
     # ------------------------------------------------------
     # IMPORTAÇÃO DE IMAGENS (arquivo ou Ctrl+V)

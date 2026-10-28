@@ -9,15 +9,32 @@ janela travaria.
 Aqui a câmera roda sozinha em segundo plano e guarda sempre o frame
 MAIS RECENTE. Quem precisa de imagem (a tela e o analisador) pega esse
 frame na hora, sem esperar e sem acumular fila de frames atrasados.
+
+A FONTE do vídeo pode ser:
+
+    um número  (0, 1, 2...)      -> webcam ligada ao computador
+    um texto   ("rtsp://...",    -> câmera IP, pela rede
+                "http://...")
+
+O resto do programa não precisa saber qual é: todos só pedem "o
+frame mais recente" com ler().
 """
 
+import os
 import threading
 import time
 from enum import Enum
 
-import cv2
-
 from safetech import config
+
+
+# O FFMPEG (que o OpenCV usa para abrir câmeras IP) lê suas opções
+# desta variável de ambiente no momento de abrir cada câmera.
+# "setdefault" respeita um valor que o usuário já tenha definido.
+if config.RTSP_POR_TCP:
+    os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+
+import cv2  # noqa: E402  (importado depois da variável de ambiente, de propósito)
 
 
 class EstadoCamera(Enum):
@@ -27,12 +44,16 @@ class EstadoCamera(Enum):
     ATIVA = "ativa"
     ERRO = "erro"
 
+    # Câmera IP que perdeu a conexão: o programa tenta de novo sozinho
+    RECONECTANDO = "reconectando"
+
 
 class Camera:
 
-    def __init__(self, indice=config.INDICE_CAMERA):
+    def __init__(self, fonte=config.INDICE_CAMERA):
+        """fonte -> índice da webcam (número) ou endereço de câmera IP (texto)."""
 
-        self._indice = indice
+        self._fonte = fonte
 
         # A trava protege as variáveis lidas por outras threads
         self._trava = threading.Lock()
@@ -86,24 +107,30 @@ class Camera:
                 self._estado = EstadoCamera.PARADA
 
     @property
-    def indice(self) -> int:
+    def fonte(self):
+        """Índice da webcam (número) ou endereço da câmera IP (texto)."""
 
-        return self._indice
+        return self._fonte
 
-    def trocar_indice(self, indice):
+    @property
+    def e_camera_ip(self) -> bool:
+
+        return eh_endereco_ip(self._fonte)
+
+    def trocar_fonte(self, fonte):
         """
         Passa a usar outra câmera. Se a atual estava ligada, desliga e
         liga a nova; se estava parada, só guarda a escolha.
         """
 
-        if indice == self._indice:
+        if fonte == self._fonte:
             return
 
         estava_ligada = self._thread is not None and self._thread.is_alive()
 
         self.parar()
 
-        self._indice = indice
+        self._fonte = fonte
 
         # Um erro da câmera antiga não vale para a nova
         with self._trava:
@@ -150,6 +177,8 @@ class Camera:
 
         captura = self._abrir()
 
+        # Falhou já na primeira tentativa: endereço errado, câmera
+        # desligada ou em uso. Mostra o erro e para por aqui.
         if captura is None:
 
             with self._trava:
@@ -157,64 +186,110 @@ class Camera:
 
             return
 
-        with self._trava:
-            self._estado = EstadoCamera.ATIVA
+        try:
+
+            while not self._parar.is_set():
+
+                with self._trava:
+                    self._estado = EstadoCamera.ATIVA
+
+                self._capturar(captura)
+
+                captura.release()
+                captura = None
+
+                if self._parar.is_set():
+                    return
+
+                # A transmissão caiu no meio do caminho
+                with self._trava:
+                    self._frame = None
+                    self._fps = 0.0
+
+                # Webcam desconectada: erro, o usuário decide o que fazer
+                if not self.e_camera_ip:
+
+                    with self._trava:
+                        self._estado = EstadoCamera.ERRO
+
+                    return
+
+                # Câmera IP: quedas de rede costumam ser passageiras,
+                # então o programa tenta reconectar sozinho até
+                # conseguir (ou até o usuário parar a câmera).
+                captura = self._reconectar()
+
+        finally:
+
+            if captura is not None:
+                captura.release()
+
+    def _capturar(self, captura):
+        """Lê frames até a câmera parar de responder (ou até pedirem para parar)."""
 
         frames_no_periodo = 0
         inicio_periodo = time.perf_counter()
         falhas_seguidas = 0
 
-        try:
+        while not self._parar.is_set():
 
-            while not self._parar.is_set():
+            sucesso, frame = captura.read()
 
-                sucesso, frame = captura.read()
+            if not sucesso:
 
-                if not sucesso:
+                # Uma falha isolada é normal; muitas seguidas
+                # significam que a câmera foi desconectada.
+                falhas_seguidas += 1
 
-                    # Uma falha isolada é normal; muitas seguidas
-                    # significam que a câmera foi desconectada.
-                    falhas_seguidas += 1
+                if falhas_seguidas > 30:
+                    return
 
-                    if falhas_seguidas > 30:
+                time.sleep(0.01)
+                continue
 
-                        with self._trava:
-                            self._estado = EstadoCamera.ERRO
-                            self._frame = None
+            falhas_seguidas = 0
 
-                        return
+            with self._trava:
+                self._frame = frame
+                self._numero_frame += 1
 
-                    time.sleep(0.01)
-                    continue
+            # Mede o FPS real da câmera a cada meio segundo
+            frames_no_periodo += 1
+            decorrido = time.perf_counter() - inicio_periodo
 
-                falhas_seguidas = 0
+            if decorrido >= 0.5:
 
                 with self._trava:
-                    self._frame = frame
-                    self._numero_frame += 1
+                    self._fps = frames_no_periodo / decorrido
 
-                # Mede o FPS real da câmera a cada meio segundo
-                frames_no_periodo += 1
-                decorrido = time.perf_counter() - inicio_periodo
+                frames_no_periodo = 0
+                inicio_periodo = time.perf_counter()
 
-                if decorrido >= 0.5:
+    def _reconectar(self):
+        """Tenta abrir a câmera IP de novo, de tempos em tempos. None se mandaram parar."""
 
-                    with self._trava:
-                        self._fps = frames_no_periodo / decorrido
+        with self._trava:
+            self._estado = EstadoCamera.RECONECTANDO
 
-                    frames_no_periodo = 0
-                    inicio_periodo = time.perf_counter()
+        while not self._parar.wait(config.INTERVALO_RECONEXAO_IP_SEG):
 
-        finally:
-            captura.release()
+            captura = self._abrir()
+
+            if captura is not None:
+                return captura
+
+        return None
 
     def _abrir(self):
-        """Abre a webcam já configurada; devolve None se não conseguir."""
+        """Abre a câmera (webcam ou IP); devolve None se não conseguir."""
+
+        if self.e_camera_ip:
+            return self._abrir_camera_ip()
 
         if config.USAR_DIRECTSHOW:
-            captura = cv2.VideoCapture(self._indice, cv2.CAP_DSHOW)
+            captura = cv2.VideoCapture(self._fonte, cv2.CAP_DSHOW)
         else:
-            captura = cv2.VideoCapture(self._indice)
+            captura = cv2.VideoCapture(self._fonte)
 
         if not captura.isOpened():
             captura.release()
@@ -232,3 +307,88 @@ class Camera:
         captura.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         return captura
+
+    def _abrir_camera_ip(self):
+        """
+        Abre uma câmera pela rede, usando o FFMPEG.
+
+        Os tempos limite evitam que o programa fique esperando para
+        sempre por uma câmera que não responde. Resolução e formato
+        não são pedidos: quem define isso é a própria câmera.
+        """
+
+        captura = cv2.VideoCapture(
+            self._fonte,
+            cv2.CAP_FFMPEG,
+            [
+                cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, config.TEMPO_LIMITE_CONEXAO_IP_MS,
+                cv2.CAP_PROP_READ_TIMEOUT_MSEC, config.TEMPO_LIMITE_LEITURA_IP_MS,
+            ],
+        )
+
+        if not captura.isOpened():
+            captura.release()
+            return None
+
+        return captura
+
+
+# ============================================================
+# FUNÇÕES AUXILIARES DE CÂMERA IP
+# ============================================================
+
+def eh_endereco_ip(fonte) -> bool:
+    """True se a fonte é um endereço de rede (texto), e não o número de uma webcam."""
+
+    return isinstance(fonte, str)
+
+
+def esconder_senha(endereco) -> str:
+    """
+    Endereço sem usuário e senha, para mostrar na tela e nos avisos.
+
+        rtsp://admin:1234@192.168.0.50:554/stream -> rtsp://192.168.0.50:554/stream
+    """
+
+    esquema, separador, resto = endereco.partition("://")
+
+    if not separador:
+        return endereco
+
+    servidor, barra, caminho = resto.partition("/")
+
+    # O que vem antes do último "@" é "usuario:senha"
+    servidor = servidor.rpartition("@")[2]
+
+    return f"{esquema}://{servidor}{barra}{caminho}"
+
+
+def montar_endereco(endereco, usuario="", senha="") -> str:
+    """
+    Junta usuário e senha ao endereço, no formato que as câmeras esperam:
+
+        rtsp://192.168.0.50:554/stream + admin + 1234
+            -> rtsp://admin:1234@192.168.0.50:554/stream
+
+    Caracteres especiais (como "@" ou ":" na senha) são codificados,
+    para não confundirem o endereço. Sem usuário, nada muda.
+    """
+
+    from urllib.parse import quote
+
+    endereco = endereco.strip()
+
+    if not usuario:
+        return endereco
+
+    esquema, separador, resto = endereco.partition("://")
+
+    if not separador:
+        return endereco
+
+    credenciais = quote(usuario, safe="")
+
+    if senha:
+        credenciais += ":" + quote(senha, safe="")
+
+    return f"{esquema}://{credenciais}@{resto}"

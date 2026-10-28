@@ -63,6 +63,18 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 - `modelos/modelo_epis.keras` + `modelos/epis.json` (`["capacete","oculos","colete","luvas"]`).
 - Dataset atual: 49 linhas em `rotulos.csv` (usando: capacete 39, óculos 36, colete 33, luvas 30).
 
+### 2.8 Excluir linha e relatório do momento (28/10, não commitado)
+- **Excluir linha** na auditoria (botão ou tecla Delete, com confirmação): a linha sai do log, da tabela e do painel web, mas vai para `auditoria/excluidos/log_excluidos.csv` (com a data da exclusão) e a foto para `auditoria/excluidos/imagens/`. Nada é apagado.
+- **Salvar relatório** na auditoria (age sobre a linha selecionada): grava `auditoria/relatorios/<data do evento>_<pessoa>/` com `relatorio.html` (dados do evento, confiança de cada EPI, foto) e `evidencia.jpg` (cópia), mais os outros eventos do mesmo segundo em `outros/`; abre o HTML no navegador.
+- Testado só com a janela oculta e câmera/detector/classificador falsos; falta conferir na tela real.
+
+### 2.9 Câmera IP (28/10, não commitado)
+- A câmera aceita um número (webcam) ou um endereço `rtsp://` / `http://` (câmera IP, aberta pelo FFMPEG do OpenCV). Tempo limite de conexão/leitura e RTSP por TCP em `config.py`.
+- Quando a rede cai, o estado vira `RECONECTANDO` e a câmera tenta voltar sozinha; endereço errado na primeira conexão vira `ERRO`.
+- Na tela: item "+ Adicionar câmera IP..." na lista de câmeras abre `safetech/interface/dialogo_camera_ip.py` (nome, endereço, usuário, senha). Botão "Remover" aparece ao lado da lista quando a câmera em uso é IP.
+- Câmeras salvas em `preferencias.json` (chave `cameras_ip`); o endereço pode conter a senha, então nunca é mostrado na tela (só o nome).
+- Testado com um servidor MJPEG falso em 127.0.0.1 (conexão, queda, reconexão, endereço errado) e com a janela oculta. Falta testar com uma câmera IP real e ver o diálogo na tela.
+
 ---
 
 ## 3. O que está pela metade

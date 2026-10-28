@@ -6,7 +6,11 @@ Mostra, na mesma tela do vídeo:
     - cartões com os totais (eventos, liberados, negados, taxa de liberação);
     - filtros (por texto e por resultado);
     - a tabela de eventos, atualizada ao vivo, com ordenação por coluna;
-    - a foto de evidência do evento selecionado.
+    - a foto de evidência do evento selecionado;
+    - o botão "Salvar relatório", que grava um relatório completo do
+      momento do evento selecionado (auditoria/relatorios);
+    - o botão "Excluir linha", que tira o evento selecionado do log
+      (movendo-o para auditoria/excluidos, sem apagar).
 
 Os registros ficam guardados em memória. Quando chega um evento novo
 ele é apenas inserido no topo da tabela; o CSV não é relido.
@@ -40,11 +44,23 @@ ALTURA_EVIDENCIA = 190
 
 class PainelAuditoria(ttk.Frame):
 
-    def __init__(self, pai, pasta_imagens, ao_zerar, escala=1.0):
+    def __init__(self, pai, pasta_imagens, ao_zerar, ao_excluir, ao_salvar_relatorio, escala=1.0):
+        """
+        ao_zerar            -> chamado pelo botão "Zerar" (sem argumentos).
+        ao_excluir          -> chamado pelo botão "Excluir linha" com o
+                               registro da linha selecionada.
+        ao_salvar_relatorio -> chamado pelo botão "Salvar relatório" com
+                               o registro da linha selecionada.
+
+        Quem confirma com o usuário e mexe nos arquivos é a janela
+        principal; o painel só diz qual linha foi escolhida.
+        """
 
         super().__init__(pai, style="Painel.TFrame", padding=18)
 
         self._ao_zerar = ao_zerar
+        self._ao_excluir = ao_excluir
+        self._ao_salvar_relatorio = ao_salvar_relatorio
         self._pasta_imagens = pasta_imagens
         self._escala = escala
         self._altura_evidencia = int(ALTURA_EVIDENCIA * escala)
@@ -101,6 +117,30 @@ class PainelAuditoria(ttk.Frame):
             command=self._ao_zerar,
             takefocus=False,
         ).pack(side="right", padx=(0, 8))
+
+        # Exclui só a linha selecionada na tabela. Começa desativado e
+        # é ativado quando o usuário escolhe uma linha.
+        self._botao_excluir = ttk.Button(
+            cabecalho,
+            text="Excluir linha",
+            style="Pequeno.Perigo.TButton",
+            command=self._excluir_selecionado,
+            takefocus=False,
+            state="disabled",
+        )
+        self._botao_excluir.pack(side="right", padx=(0, 8))
+
+        # Relatório completo do momento da linha selecionada (dados do
+        # evento, confiança de cada EPI e a foto). Também começa
+        # desativado, até o usuário escolher uma linha.
+        self._botao_relatorio = ttk.Button(
+            cabecalho,
+            text="Salvar relatório",
+            command=self._salvar_relatorio_selecionado,
+            takefocus=False,
+            state="disabled",
+        )
+        self._botao_relatorio.pack(side="right", padx=(0, 8))
 
     def _montar_indicadores(self):
 
@@ -201,6 +241,9 @@ class PainelAuditoria(ttk.Frame):
         self._tabela.bind("<<TreeviewSelect>>", self._ao_selecionar)
         self._tabela.bind("<Double-1>", self._ao_duplo_clique)
 
+        # Tecla Delete com a tabela em foco: o mesmo que o botão Excluir
+        self._tabela.bind("<Delete>", lambda _evento: self._excluir_selecionado())
+
     def _montar_evidencia(self):
 
         cartao = ttk.Frame(self, style="Cartao.TFrame", padding=12)
@@ -271,12 +314,31 @@ class PainelAuditoria(ttk.Frame):
             if len(linhas) > config.MAXIMO_LINHAS_TABELA:
                 self._remover_linha(linhas[-1])
 
+    def remover(self, registro):
+        """Tira um evento da tela (depois de excluído do log)."""
+
+        # Os registros são comparados pelo conteúdo (dataclass): sai
+        # só a primeira ocorrência, como no CSV.
+        if registro in self._registros:
+            self._registros.remove(registro)
+
+        self._atualizar_indicadores()
+        self._redesenhar_tabela()
+        self._limpar_evidencia()
+
     def esvaziar(self):
         """Tira tudo da tela: tabela, indicadores e a foto de evidência."""
 
         self.carregar([])
 
+        self._limpar_evidencia()
+
+    def _limpar_evidencia(self):
+        """Volta o cartão da foto ao texto inicial (nenhuma linha selecionada)."""
+
         self._rotulo_detalhes.config(text="")
+
+        self._ativar_botoes_da_linha(False)
 
         self._mostrar_texto_evidencia(
             "Selecione um evento para ver a foto. Duplo clique abre em tamanho real."
@@ -407,7 +469,10 @@ class PainelAuditoria(ttk.Frame):
         registro = self._registro_selecionado()
 
         if registro is None:
+            self._ativar_botoes_da_linha(False)
             return
+
+        self._ativar_botoes_da_linha(True)
 
         evento = "Primeira decisão" if registro.evento == "ENTRADA" else "Mudança de decisão"
 
@@ -462,6 +527,30 @@ class PainelAuditoria(ttk.Frame):
 
         if caminho.exists():
             os.startfile(caminho)
+
+    def _ativar_botoes_da_linha(self, ativo):
+        """Os botões que agem sobre UMA linha só funcionam com uma linha selecionada."""
+
+        estado = ["!disabled"] if ativo else ["disabled"]
+
+        self._botao_excluir.state(estado)
+        self._botao_relatorio.state(estado)
+
+    def _salvar_relatorio_selecionado(self):
+        """Botão "Salvar relatório": repassa à janela principal."""
+
+        registro = self._registro_selecionado()
+
+        if registro is not None:
+            self._ao_salvar_relatorio(registro)
+
+    def _excluir_selecionado(self):
+        """Botão "Excluir linha" (ou tecla Delete): repassa à janela principal."""
+
+        registro = self._registro_selecionado()
+
+        if registro is not None:
+            self._ao_excluir(registro)
 
     def _abrir_pasta(self):
         """Abre a pasta de auditoria (CSV e fotos) no Explorador de Arquivos."""

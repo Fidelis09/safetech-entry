@@ -50,10 +50,12 @@ class ServicoAuditoria:
         self,
         arquivo_log=config.ARQUIVO_LOG_AUDITORIA,
         pasta_imagens=config.PASTA_IMAGENS_AUDITORIA,
+        pasta_excluidos=config.PASTA_EXCLUIDOS,
     ):
 
         self._arquivo_log = arquivo_log
         self._pasta_imagens = pasta_imagens
+        self._pasta_excluidos = pasta_excluidos
 
         # O registro é chamado pela thread de análise e a leitura pela
         # interface; a trava impede que as duas mexam no arquivo juntas.
@@ -208,6 +210,100 @@ class ServicoAuditoria:
                 csv.writer(arquivo).writerow(COLUNAS)
 
         return destino, eventos, len(fotos)
+
+    # ============================================================
+    # EXCLUIR UMA LINHA (movendo para "excluidos", sem apagar)
+    # ============================================================
+
+    def excluir(self, registro: RegistroAuditoria) -> bool:
+        """
+        Tira um evento do log de auditoria.
+
+        Assim como o "Zerar", nada é apagado de verdade:
+
+            - a linha sai do log principal e vai para
+              "excluidos/log_excluidos.csv", com a data da exclusão;
+            - a foto de evidência é MOVIDA para "excluidos/imagens".
+
+        Assim um evento registrado por engano some da tabela, mas
+        continua existindo para quem precisar conferir depois.
+
+        Devolve True se a linha foi encontrada e excluída. Pode lançar
+        OSError (ex.: o CSV está aberto no Excel); nesse caso o log
+        principal fica como estava.
+        """
+
+        linha_procurada = registro.como_linha()
+
+        with self._trava:
+
+            with open(self._arquivo_log, "r", newline="", encoding="utf-8", errors="replace") as arquivo:
+                linhas = list(csv.reader(arquivo))
+
+            # linhas[0] é o cabeçalho; procura a partir da primeira linha de dados
+            posicao = next(
+                (
+                    indice
+                    for indice, linha in enumerate(linhas[1:], start=1)
+                    if linha == linha_procurada
+                ),
+                None,
+            )
+
+            if posicao is None:
+                return False
+
+            del linhas[posicao]
+
+            # O log novo é escrito num arquivo temporário e só depois
+            # troca de lugar com o antigo. Se algo falhar no meio, o
+            # log original continua inteiro.
+            temporario = self._arquivo_log.with_suffix(".tmp")
+
+            try:
+
+                with open(temporario, "w", newline="", encoding="utf-8") as arquivo:
+                    csv.writer(arquivo).writerows(linhas)
+
+                temporario.replace(self._arquivo_log)
+
+            finally:
+
+                if temporario.exists():
+                    temporario.unlink()
+
+            # Daqui em diante a linha já saiu do log: guarda a cópia
+            pasta_excluidos = self._pasta_excluidos
+            (pasta_excluidos / "imagens").mkdir(parents=True, exist_ok=True)
+
+            log_excluidos = pasta_excluidos / "log_excluidos.csv"
+            novo = not log_excluidos.exists()
+
+            with open(log_excluidos, "a", newline="", encoding="utf-8") as arquivo:
+
+                escritor = csv.writer(arquivo)
+
+                if novo:
+                    escritor.writerow(COLUNAS + ["excluido_em"])
+
+                escritor.writerow(
+                    linha_procurada + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                )
+
+            foto = self._pasta_imagens / registro.imagem if registro.imagem else None
+
+            if foto is not None and foto.exists():
+
+                try:
+                    foto.rename(pasta_excluidos / "imagens" / foto.name)
+
+                except OSError:
+
+                    # Foto aberta em outro programa: ela fica onde está.
+                    # A linha já foi excluída e continua registrada.
+                    pass
+
+        return True
 
     def _contar_eventos(self) -> int:
         """Linhas de evento no CSV (sem o cabeçalho). Chamar dentro da trava."""
