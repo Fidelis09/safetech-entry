@@ -192,11 +192,16 @@ class ServicoAuditoria:
             if eventos == 0 and not fotos:
                 return None, 0, 0
 
-            destino = (
-                self._arquivo_log.parent
-                / "arquivados"
-                / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            )
+            base = self._arquivo_log.parent / "arquivados" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+            # Duas vezes "Zerar" no mesmo segundo: a segunda pasta
+            # ganha um número, para não esbarrar na primeira.
+            destino = base
+            numero = 2
+
+            while destino.exists():
+                destino = base.with_name(f"{base.name}_{numero}")
+                numero += 1
 
             (destino / "imagens").mkdir(parents=True, exist_ok=True)
 

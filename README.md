@@ -2,7 +2,7 @@
 
 Catraca inteligente com reconhecimento de EPI por visão computacional.
 
-O programa usa a webcam para verificar, **equipamento por equipamento** (capacete, óculos, colete e luvas), o que cada pessoa na frente da câmera está usando. Você escolhe o setor que está sendo fiscalizado e o sistema cobra apenas os EPIs exigidos nele: num setor que só exige luvas, quem está de luvas passa. O acesso só é liberado quando todas as pessoas na imagem estão em conformidade, e cada decisão fica registrada em um log de auditoria, com foto de evidência.
+O programa usa a câmera (webcam ou câmera IP) para verificar, **equipamento por equipamento** (capacete, óculos, colete e luvas), o que cada pessoa na frente da câmera está usando. Você escolhe o setor que está sendo fiscalizado e o sistema cobra apenas os EPIs exigidos nele: num setor que só exige luvas, quem está de luvas passa. O acesso só é liberado quando todas as pessoas na imagem estão em conformidade, e cada decisão fica registrada em um log de auditoria, com foto de evidência.
 
 Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas a parte de visão computacional; a confirmação por voz da Ordem de Serviço fica para uma etapa futura.
 
@@ -20,14 +20,16 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 8. [Auditoria](#auditoria)
 9. [Configuração](#configuração)
 10. [Desempenho](#desempenho)
-11. [Solução de problemas](#solução-de-problemas)
-12. [Limitações e próximos passos](#limitações-e-próximos-passos)
+11. [Testes](#testes)
+12. [Solução de problemas](#solução-de-problemas)
+13. [Limitações e próximos passos](#limitações-e-próximos-passos)
 
 ---
 
 ## Funcionalidades
 
 - **Vídeo ao vivo** da webcam, fluido e ajustado ao tamanho da janela.
+- **Câmera IP**: câmeras de segurança (`rtsp://`) ou o celular (`http://`) adicionadas pela própria tela, com reconexão automática quando a rede cai.
 - **EPIs reconhecidos separadamente**: o modelo dá uma resposta independente para cada equipamento.
 - **Fiscalização por setor**: perfis prontos (cada setor com seus EPIs obrigatórios) e caixas de seleção para ajustar na hora. A última seleção é lembrada ao reabrir o programa.
 - **Várias pessoas ao mesmo tempo** (fila): cada uma recebe uma caixa que a acompanha, com número e o que está faltando.
@@ -36,6 +38,9 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - **Status do acesso** em destaque: liberado (verde), negado (vermelho), analisando (laranja) ou aguardando.
 - **Confiança mínima e intervalo de análise** ajustáveis na tela, com efeito imediato.
 - **Auditoria na mesma tela**: indicadores, filtros, busca, ordenação por coluna e foto de evidência do evento selecionado. Cada evento guarda o setor, o que era exigido e o que faltava.
+- **Relatório de um evento**: um clique gera uma página com todos os dados do momento da linha selecionada, a foto e os outros eventos do mesmo instante.
+- **Excluir linha sem perder o registro**: o evento sai da tabela, mas vai para uma pasta de excluídos, com a data da exclusão.
+- **Testes automatizados**: 63 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
 - **Coleta de dataset rotulada**: marque o que a pessoa está usando e salve, por botão ou atalho de teclado.
 - **Painel web do gerente**, somente leitura: status ao vivo, indicadores, gráfico e fotos pelo navegador, inclusive no celular.
 - **Abertura imediata**: a janela aparece na hora e o modelo de IA carrega em segundo plano.
@@ -48,15 +53,17 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 
 - Windows 10 ou 11
 - Python 3.10 ou superior (testado com 3.13)
-- Webcam
+- Webcam ou câmera IP na mesma rede
 
 ### Passo a passo
 
 1. Instale as dependências:
 
    ```bash
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
    ```
+
+   As versões estão fixas no arquivo: são as mesmas com que o projeto foi testado.
 
 2. Confira a pasta `modelos/`:
 
@@ -64,10 +71,10 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
    |---|---|---|
    | `face_detection_yunet_2023mar.onnx` | Localiza as pessoas pelo rosto (modo rosto) | Baixado uma vez (já vem no repositório) |
    | `object_detection_yolox_2022nov.onnx` | Localiza as pessoas pelo corpo inteiro (modo corpo) | **Não vem no repositório** (35 MB). Veja [Modo de detecção](#modo-de-detecção-rosto-ou-corpo) |
-   | `modelo_epis.keras` e `epis.json` | Modelo **por EPI** | Gerados pelo `treinar.py`, depois de você coletar imagens rotuladas |
+   | `modelo_epis.keras` e `epis.json` | Modelo **por EPI** | Já vêm no repositório (treinado com um dataset pequeno); gerados de novo pelo `treinar.py` |
    | `modelo_epi.keras` e `classes.json` | Modelo **antigo** (só "com EPI" / "sem EPI") | Já vêm no repositório |
 
-   > **Importante:** o repositório vem só com o modelo antigo. Com ele o programa funciona, mas **não distingue os equipamentos** nem aplica a seleção por setor (a área de fiscalização fica desativada, com um aviso). Para ativar a fiscalização por EPI, siga [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino). Depois de treinado, o modelo por EPI passa a ser usado automaticamente.
+   > **Importante:** o repositório já traz um modelo por EPI, mas treinado com poucas imagens (49): ele funciona para demonstração e erra bastante. Para um resultado confiável, colete mais imagens e treine de novo (veja [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino)). Sem o modelo por EPI, o programa usa o modelo antigo, que **não distingue os equipamentos** (a área de fiscalização fica desativada, com um aviso).
 
    Se o detector de rosto estiver faltando, baixe com (PowerShell, na pasta do projeto):
 
@@ -75,7 +82,7 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
    Invoke-WebRequest -Uri "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx" -OutFile "modelos/face_detection_yunet_2023mar.onnx"
    ```
 
-3. Para usar a fiscalização por EPI, colete imagens e treine (veja [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino)).
+3. Para melhorar o reconhecimento, colete mais imagens e treine (veja [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino)).
 
 ---
 
@@ -99,7 +106,8 @@ A janela abre na hora, com a mensagem "Carregando o modelo de IA". Quando o bot�
 | **Confiança mínima** | Confiança necessária para considerar que a pessoa está usando um EPI. Mais alto = mais rigoroso. |
 | **Intervalo de análise** | De quanto em quanto tempo cada pessoa é reclassificada. |
 | **Coleta de imagens** | Salva o recorte de cada pessoa, com os rótulos marcados, para treinar o modelo. |
-| **Auditoria** | Indicadores, filtros e tabela de eventos, atualizados ao vivo. Clique em um evento para ver a foto, o que era exigido e a confiança de cada EPI; duplo clique abre a foto em tamanho real. Clique no título de uma coluna para ordenar. |
+| **Câmera** | Lista no topo do vídeo: webcams encontradas, câmeras IP cadastradas e a opção **+ Adicionar câmera IP...** |
+| **Auditoria** | Indicadores, filtros e tabela de eventos, atualizados ao vivo. Clique em um evento para ver a foto, o que era exigido e a confiança de cada EPI; duplo clique abre a foto em tamanho real. Clique no título de uma coluna para ordenar. Com uma linha selecionada, **Salvar relatório** e **Excluir linha** passam a funcionar. |
 
 ### Fiscalização por setor
 
@@ -144,6 +152,29 @@ O modo corpo depende do arquivo `modelos/object_detection_yolox_2022nov.onnx` (3
 Invoke-WebRequest -Uri "https://github.com/opencv/opencv_zoo/raw/main/models/object_detection_yolox/object_detection_yolox_2022nov.onnx" -OutFile "modelos/object_detection_yolox_2022nov.onnx"
 ```
 
+### Câmera IP
+
+Além da webcam, o programa abre câmeras pela rede: câmeras de segurança (endereço `rtsp://`) e câmeras simples ou o celular (endereço `http://`).
+
+1. Na lista **Câmera**, no topo do vídeo, escolha **+ Adicionar câmera IP...**.
+2. Preencha o **nome** (ex.: "Portaria"), o **endereço do vídeo** e, se a câmera pedir, **usuário** e **senha**.
+3. Clique em **Adicionar**. A câmera entra na lista como "Portaria (IP)", liga na hora e fica salva para as próximas vezes.
+
+Com uma câmera IP selecionada, o botão **Remover**, ao lado da lista, tira a câmera do cadastro e volta para a última webcam usada.
+
+| Câmera | Endereço típico |
+|---|---|
+| Intelbras | `rtsp://192.168.0.50:554/cam/realmonitor?channel=1&subtype=1` |
+| Hikvision | `rtsp://192.168.0.50:554/Streaming/Channels/102` |
+| Celular Android (app **IP Webcam**) | `http://192.168.0.20:8080/video` |
+
+Dicas:
+
+- **Use o stream de qualidade menor** (substream: `subtype=1` na Intelbras, canal `102` na Hikvision). A IA não precisa de 4K e a análise fica mais rápida.
+- **Para testar sem câmera**, instale o app gratuito **IP Webcam** no celular, toque em "Iniciar servidor" e use o endereço que ele mostrar. Celular e computador precisam estar no mesmo Wi-Fi.
+- **Se a rede cair**, a faixa de status mostra `RECONECTANDO` e o programa tenta voltar sozinho, a cada `INTERVALO_RECONEXAO_IP_SEG` segundos.
+- **A senha da câmera não aparece na tela**: só o nome. O endereço completo fica no `preferencias.json`, que não vai para o repositório.
+
 ### Atalhos de teclado
 
 | Tecla | Ação |
@@ -152,6 +183,7 @@ Invoke-WebRequest -Uri "https://github.com/opencv/opencv_zoo/raw/main/models/obj
 | `S` | Salva uma imagem da câmera com os rótulos marcados na área de coleta |
 | `Ctrl+V` | Cola no dataset uma imagem copiada (ou arquivos de imagem copiados), com os rótulos marcados |
 | `Esc` | Limpa a busca da auditoria |
+| `Delete` | Exclui a linha selecionada na tabela de auditoria (com confirmação) |
 
 Os atalhos ficam desativados enquanto você digita no campo de busca.
 
@@ -289,8 +321,12 @@ Tech_day_26.2/
 ├── treinar.py              Treina o modelo
 ├── reconhecer.py           Testa o modelo com uma foto
 ├── painel_web.py           Painel web só com o histórico (sem abrir a catraca)
-├── requirements.txt        Dependências
+├── requirements.txt        Dependências (versões fixas)
+├── requirements-dev.txt    Dependências só para desenvolver (pytest)
+├── pytest.ini              Configuração dos testes
 ├── README.md
+├── .github/workflows/      Testes automáticos no GitHub (Actions)
+├── testes/                 Testes automatizados (python -m pytest)
 │
 ├── safetech/               Código do projeto
 │   ├── config.py           Todas as configurações (caminhos e ajustes)
@@ -307,17 +343,19 @@ Tech_day_26.2/
 │   │   └── anotacao.py         Desenha caixas e rótulos na imagem
 │   │
 │   ├── servicos/           O que acontece ao redor do núcleo
-│   │   ├── camera.py           Captura da webcam em thread própria
+│   │   ├── camera.py           Captura da webcam ou câmera IP em thread própria
 │   │   ├── analisador.py       Linha de análise em thread própria
 │   │   ├── auditoria.py        Log em CSV e fotos de evidência
+│   │   ├── relatorio.py        Relatório HTML de um evento da auditoria
 │   │   ├── dataset.py          Salva imagens de treino com os rótulos
 │   │   ├── importacao.py       Abre imagens de arquivo ou da área de transferência
-│   │   └── preferencias.py     Lembra o setor e os EPIs selecionados
+│   │   └── preferencias.py     Lembra setor, EPIs, câmera e câmeras IP
 │   │
 │   ├── interface/          A janela (Tkinter)
 │   │   ├── tema.py                  Cores, fontes e estilos
 │   │   ├── painel_monitoramento.py  Vídeo, status, fiscalização, ajustes e coleta
 │   │   ├── painel_auditoria.py      Indicadores, filtros, tabela e evidência
+│   │   ├── dialogo_camera_ip.py     Janela "Adicionar câmera IP"
 │   │   └── janela_principal.py      Monta a tela e liga tudo
 │   │
 │   ├── web/                Painel web do gerente (somente leitura)
@@ -331,10 +369,12 @@ Tech_day_26.2/
 ├── dataset/                Dados de treino (não vão para o repositório)
 │   ├── epis/               Imagens coletadas pelo aplicativo
 │   └── rotulos.csv         Quais EPIs aparecem em cada imagem
-├── preferencias.json       Última seleção de setor (gerado pelo programa)
+├── preferencias.json       Seleções e câmeras IP (gerado pelo programa)
 └── auditoria/              Gerada pelo programa
     ├── log_auditoria.csv
     ├── arquivados/         Logs e fotos anteriores, movidos pelo botão Zerar
+    ├── excluidos/          Linhas e fotos tiradas pelo botão Excluir linha
+    ├── relatorios/         Relatórios gerados pelo botão Salvar relatório
     └── imagens/            Fotos de evidência
 ```
 
@@ -441,6 +481,24 @@ O botão **Zerar**, no cabeçalho do painel de auditoria, recomeça tudo do zero
 
 O programa pede confirmação antes. E **nada é apagado**: o log e as fotos são movidos para `auditoria/arquivados/<data e hora>/`. Para liberar espaço em disco de verdade, exclua essa pasta à mão.
 
+### Salvar o relatório de um evento
+
+Selecione uma linha e clique em **Salvar relatório**. O programa cria a pasta `auditoria/relatorios/<data e hora do evento>_<pessoa>/` e abre o relatório no navegador:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `relatorio.html` | Resultado, pessoa, data e hora, tipo de evento, setor, EPIs exigidos, o que faltava, confiança de cada EPI (com os exigidos marcados) e a foto |
+| `evidencia.jpg` | Cópia da foto de evidência |
+| `outros/` | Fotos dos outros eventos registrados no mesmo segundo, que também aparecem no relatório |
+
+As fotos são **copiadas**: o log e a foto original não mudam. A pasta pode ser compactada e enviada, porque o relatório só usa caminhos relativos.
+
+### Excluir uma linha
+
+Selecione a linha e clique em **Excluir linha** (ou pressione `Delete`). Depois da confirmação, o evento sai da tabela, do log e do painel web.
+
+Como no Zerar, **nada é apagado**: a linha vai para `auditoria/excluidos/log_excluidos.csv`, com uma coluna a mais (`excluido_em`, a data da exclusão), e a foto vai para `auditoria/excluidos/imagens/`.
+
 ### Quando uma foto é gravada
 
 | Situação | Grava? |
@@ -474,7 +532,11 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `TAMANHO_HISTORICO_DECISAO` | `5` | Quantas classificações entram na mediana da decisão |
 | `CONFIRMACOES_PARA_MUDANCA` | `3` | Classificações seguidas necessárias para registrar uma mudança de decisão (com foto nova) |
 | `AMOSTRAS_MINIMAS_DECISAO` | `2` | Classificações necessárias antes da primeira decisão |
-| `INDICE_CAMERA` | `0` | Qual webcam usar |
+| `INDICE_CAMERA` | `1` | Webcam usada na primeira abertura (depois vale a escolhida na tela). Num computador com uma webcam só, use `0` |
+| `TEMPO_LIMITE_CONEXAO_IP_MS` | `8000` | Tempo máximo esperando uma câmera IP responder ao conectar |
+| `TEMPO_LIMITE_LEITURA_IP_MS` | `5000` | Sem imagem por esse tempo, a conexão com a câmera IP é considerada perdida |
+| `INTERVALO_RECONEXAO_IP_SEG` | `3.0` | Espera entre tentativas de reconectar à câmera IP |
+| `RTSP_POR_TCP` | `True` | Vídeo RTSP por TCP: um pouco mais de atraso, sem imagem cinza quando a rede perde pacotes |
 | `LARGURA_CAPTURA` / `ALTURA_CAPTURA` | `1280` / `720` | Resolução pedida à câmera. Alta para câmera geral, com várias pessoas pequenas na imagem |
 | `MODO_DETECCAO_PADRAO` | `"rosto"` | Modo de detecção na primeira vez que o programa abre |
 | `LARGURAS_DETECCAO` | `(640, 320)` | Larguras das cópias usadas na detecção de rosto. A maior acha rostos pequenos, a menor acha rostos grandes e próximos |
@@ -491,7 +553,7 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `PAINEL_WEB_ATIVO` | `True` | Liga ou desliga o painel web |
 | `PAINEL_WEB_HOST` | `"0.0.0.0"` | `"0.0.0.0"` = acessível na rede; `"127.0.0.1"` = só neste computador |
 | `PAINEL_WEB_PORTA` | `8080` | Porta do painel web |
-| `PAINEL_WEB_USUARIO` / `PAINEL_WEB_SENHA` | `gerente` / `safetech` | Login do painel. Troque a senha; senha vazia desliga o login |
+| `PAINEL_WEB_USUARIO` / `PAINEL_WEB_SENHA` | `gerente` / (veja o arquivo) | Login do painel. Troque a senha; senha vazia desliga o login |
 
 ---
 
@@ -520,6 +582,40 @@ O tempo de abertura do modelo depende do TensorFlow: alguns segundos normalmente
 
 ---
 
+## Testes
+
+O projeto tem testes automatizados na pasta `testes/`. Para rodar:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Saída esperada: `63 passed` em menos de um minuto.
+
+| Arquivo | O que testa |
+|---|---|
+| `test_decisao.py` | Regras de liberação: setor, limiar, mediana, EPI desconhecido, decisão da catraca |
+| `test_auditoria.py` | Gravar, ler, excluir linha, zerar e log de formato antigo (nada é apagado) |
+| `test_relatorio.py` | Relatório de um evento: conteúdo, foto copiada, outros eventos, texto escapado no HTML |
+| `test_preferencias.py` | Preferências salvas, arquivo corrompido, câmeras IP |
+| `test_camera.py` | Câmera IP: conexão, queda e reconexão, endereço errado, senha escondida |
+| `test_analisador.py` | Linha de análise completa: decisão, uma foto por pessoa, troca de setor |
+| `test_painel_web.py` | Painel web: login, somente leitura, proteção das pastas |
+| `test_janela.py` | Botões da janela: excluir linha, salvar relatório, adicionar e remover câmera IP |
+
+Os testes seguem três regras:
+
+- **Nunca tocam nos dados reais**: auditoria, dataset e preferências vão para uma pasta temporária (veja `testes/conftest.py`).
+- **Nunca ligam a webcam nem mostram janelas**: usam câmera, detector e classificador falsos (`testes/falsos.py`) e a janela fica escondida.
+- **Não precisam do TensorFlow**: o classificador é falso. Por isso também rodam no GitHub sem baixar a biblioteca.
+
+A câmera IP é testada com um servidor de vídeo falso, que roda no próprio computador e é desligado e religado para simular a queda da rede.
+
+No GitHub, os testes rodam sozinhos a cada envio de código (arquivo `.github/workflows/testes.yml`).
+
+---
+
 ## Solução de problemas
 
 | Problema | Solução |
@@ -530,6 +626,9 @@ O tempo de abertura do modelo depende do TensorFlow: alguns segundos normalmente
 | **O treino diz que falta um caso** | Algum EPI só tem imagens "usando" ou só "sem usar". Colete o caso que falta. |
 | **Luvas nunca são reconhecidas** | As mãos precisam aparecer dentro da caixa da pessoa. Afaste-se um pouco da câmera ou aumente `MARGEM_INFERIOR_ROSTO`. |
 | **"Não foi possível acessar a webcam"** | Feche outros programas que usem a câmera (Teams, Zoom, navegador). Se houver mais de uma câmera, mude `INDICE_CAMERA`. |
+| **"Não foi possível conectar à câmera IP"** | Confira o endereço, o usuário e a senha (abra o mesmo endereço no VLC, em Mídia > Abrir fluxo de rede, para testar fora do programa). A câmera precisa estar ligada e na mesma rede. |
+| **Câmera IP com atraso ou lenta** | Use o substream da câmera (resolução menor). |
+| **Imagem da câmera IP cinza ou borrada** | Perda de pacotes na rede. Deixe `RTSP_POR_TCP = True` e, se possível, use cabo em vez de Wi-Fi. |
 | **Aviso "Detector de rosto não encontrado"** | Baixe o arquivo `.onnx` (veja [Instalação](#instalação)). Sem ele o programa funciona, mas trata a cena inteira como uma pessoa. |
 | **Vídeo lento** | Reduza `LARGURA_CAPTURA`/`ALTURA_CAPTURA` para 640 e 480 e aumente o intervalo de análise na tela. |
 | **Nem todas as pessoas são detectadas** | Se elas estão de costas, de lado ou se cruzando, mude para o modo **Corpo**. No modo rosto, o rosto precisa estar visível e não muito pequeno: acrescente uma escala maior em `LARGURAS_DETECCAO` (por exemplo, `(960, 640, 320)`) ou aproxime a câmera. |
@@ -551,7 +650,7 @@ Limitações conhecidas:
 - **No modo rosto, a pessoa é localizada pelo rosto.** De costas ou com o rosto muito coberto, ela não é detectada; para isso existe o modo corpo.
 - **No modo corpo, quem está quase todo encoberto por outra pessoa pode não ser detectado**, e a análise é mais lenta.
 - **O modelo de EPI precisa de imagens dos dois modos** para funcionar bem em ambos, porque o recorte de cada um é diferente.
-- **O modelo por EPI precisa ser treinado por você.** O repositório traz só o modelo antigo; a fiscalização por equipamento depende de coletar imagens rotuladas e treinar.
+- **O modelo por EPI que vem no repositório foi treinado com poucas imagens.** Ele serve para demonstração; para uso real, é preciso coletar um dataset maior e treinar de novo.
 - **O modelo olha o recorte inteiro da pessoa, reduzido para 224x224.** Itens pequenos, como óculos e luvas, são os mais difíceis e os que mais dependem de um dataset grande e variado.
 - **As mãos precisam estar visíveis** para as luvas serem avaliadas. Mãos fora da imagem ou atrás do corpo contam como "sem luvas".
 - **Pessoas muito próximas** podem ter as caixas sobrepostas, e o equipamento de uma influenciar o resultado da outra.
@@ -564,4 +663,4 @@ Próximos passos possíveis:
 - Um detector de objetos (que localiza cada equipamento na imagem), mais preciso para itens pequenos como óculos e luvas.
 - Edição dos setores pela própria tela, sem mexer no `config.py`.
 - Integração com uma catraca real (acionamento por relé ou porta serial).
-- Exportação de relatórios da auditoria por período.
+- Relatórios da auditoria por período (dia, semana), além do relatório por evento que já existe.

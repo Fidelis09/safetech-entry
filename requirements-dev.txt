@@ -1,0 +1,11 @@
+# ============================================================
+# DEPENDÊNCIAS DE DESENVOLVIMENTO
+# ============================================================
+#
+# Só para quem vai mexer no código e rodar os testes:
+#
+#     python -m pip install -r requirements.txt -r requirements-dev.txt
+#     python -m pytest
+# ============================================================
+
+pytest==9.2.0

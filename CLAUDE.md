@@ -28,6 +28,7 @@ python treinar.py      # treina o modelo por EPI com dataset/epis + dataset/rotu
 python reconhecer.py   # testa o modelo com uma foto
 python painel_web.py   # painel web só com o histórico, sem câmera
 python -m compileall -q app.py treinar.py reconhecer.py painel_web.py safetech   # checagem rápida de sintaxe
+python -m pytest       # testes automatizados (pasta testes/, ~35 s)
 ```
 
 ## Arquitetura (resumo)
@@ -50,7 +51,9 @@ python -m compileall -q app.py treinar.py reconhecer.py painel_web.py safetech  
 
 ## Testes
 
-- Não há pasta de testes no repositório ainda (ver `PROGRESSO.md`).
+- Testes em `testes/` (pytest, configurado em `pytest.ini`). Rodar `python -m pytest` depois de qualquer mudança e manter todos passando; funcionalidade nova ganha teste novo.
+- `testes/conftest.py` já redireciona os caminhos abaixo e oferece as fixtures `auditoria`, `raiz` (janela escondida) e `sem_ia`; `testes/falsos.py` tem câmera, detector, classificador e câmera IP falsos. Reaproveitar em vez de recriar.
+- Os testes não podem depender do TensorFlow (o GitHub Actions não o instala).
 - Testes devem gravar só em **pastas temporárias**: alterar `config.PASTA_AUDITORIA`, `config.ARQUIVO_LOG_AUDITORIA`, `config.PASTA_IMAGENS_AUDITORIA`, `config.PASTA_IMAGENS_DATASET`, `config.ARQUIVO_ROTULOS`, `config.ARQUIVO_PREFERENCIAS`, `config.PASTA_EXCLUIDOS` e `config.PASTA_RELATORIOS` **antes** de importar os serviços (os padrões são lidos na importação).
 - Para o painel web em teste: `config.PAINEL_WEB_HOST = "127.0.0.1"` e outra porta, para não acionar o firewall do Windows nem colidir com o app aberto.
 - Câmera IP em teste: servir um MJPEG falso em `127.0.0.1` (`multipart/x-mixed-replace`) e abrir `http://127.0.0.1:<porta>/...`.

@@ -33,6 +33,7 @@ _versao_anterior/
 # ============================================================
 
 __pycache__/
+.pytest_cache/
 *.py[cod]
 .venv/
 venv/

@@ -75,16 +75,22 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 - Câmeras salvas em `preferencias.json` (chave `cameras_ip`); o endereço pode conter a senha, então nunca é mostrado na tela (só o nome).
 - Testado com um servidor MJPEG falso em 127.0.0.1 (conexão, queda, reconexão, endereço errado) e com a janela oculta. Falta testar com uma câmera IP real e ver o diálogo na tela.
 
+### 2.10 Testes, README e GitHub Actions (30/10)
+- Pasta `testes/` com 63 testes pytest (decisão, auditoria, relatório, preferências, câmera IP, analisador, painel web, janela). `testes/conftest.py` redireciona os dados para pasta temporária; `testes/falsos.py` tem as peças falsas.
+- Os testes acharam um bug: "Zerar" duas vezes no mesmo segundo dava erro (pasta de arquivo com o mesmo nome). Corrigido em `auditoria.zerar()`, com teste.
+- `requirements.txt` com versões fixas; `requirements-dev.txt` (pytest); `.github/workflows/testes.yml` roda os testes em Windows a cada push (sem TensorFlow).
+- README: corrigidos os dois trechos que diziam que o repositório só trazia o modelo antigo; novas seções de câmera IP, relatório, excluir linha e testes.
+
 ---
 
 ## 3. O que está pela metade
 
 Nenhuma alteração de código ficou incompleta: tudo foi commitado. Estão pela metade:
 
-1. **README desatualizado em dois trechos.** Ele ainda diz que o repositório traz só o modelo antigo (linhas ~70 e ~554 do `README.md`), mas desde o commit `8b34692` o `modelo_epis.keras` está versionado. Corrigir esses dois parágrafos.
+1. ~~README desatualizado~~: corrigido em 30/10.
 2. **Publicação no GitHub.** Repositório só local, sem remoto. Parou esperando o usuário instalar e autenticar o GitHub CLI. Decisões já tomadas: repositório **público**, autor "João Fidelis <jfidelis999@gmail.com>", **sem** fotos do dataset.
 3. **Qualidade do modelo de EPI.** Ver seção 5. Parou em: o usuário treinou com 49 imagens; nos testes do sistema, quase todas as pessoas saem como "NEGADO".
-4. **Testes automatizados não estão no repositório.** Foram escritos durante a sessão numa pasta temporária, que se perde. Ver seção 4, passo 4.
+4. ~~Testes fora do repositório~~: pasta `testes/` criada em 30/10. Depois de publicar no GitHub, acrescentar ao topo do README o selo do Actions (precisa da URL do repositório).
 
 ---
 

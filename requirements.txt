@@ -1,4 +1,18 @@
-tensorflow
-numpy
-opencv-python
-pillow
+# ============================================================
+# DEPENDÊNCIAS DO SAFETECH ENTRY
+# ============================================================
+#
+# Instalar com:   python -m pip install -r requirements.txt
+#
+# As versões são FIXAS (==) de propósito: são as versões com que o
+# projeto foi desenvolvido e testado. Com versão solta, uma atualização
+# de biblioteca poderia quebrar o programa num computador novo.
+#
+# Atenção: o OpenCV precisa ser da série 5 (o código usa FaceDetectorYN
+# e o FFMPEG embutido para câmeras IP).
+# ============================================================
+
+tensorflow==2.21.0
+numpy==2.5.2
+opencv-python==5.0.0.93
+pillow==12.3.0

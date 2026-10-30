@@ -1,0 +1,44 @@
+# ============================================================
+# TESTES AUTOMÁTICOS NO GITHUB (GitHub Actions)
+# ============================================================
+#
+# A cada envio de código (push) ou pull request, o GitHub liga uma
+# máquina Windows limpa, instala o projeto e roda todos os testes.
+# O resultado aparece na aba "Actions" e no selo do README.
+#
+# O TensorFlow NÃO é instalado aqui: os testes usam classificadores
+# falsos e não precisam dele (são ~500 MB a menos, e o teste roda em
+# poucos minutos).
+# ============================================================
+
+name: Testes
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  testes:
+    # Windows: o mesmo sistema em que o programa é usado
+    runs-on: windows-latest
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Instalar o Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalar as dependências (sem o TensorFlow)
+        shell: bash
+        run: |
+          grep -v -i "^tensorflow" requirements.txt > requisitos_ci.txt
+          python -m pip install -r requisitos_ci.txt -r requirements-dev.txt
+
+      - name: Conferir a sintaxe de todos os arquivos
+        run: python -m compileall -q app.py treinar.py reconhecer.py painel_web.py safetech testes
+
+      - name: Rodar os testes
+        run: python -m pytest
