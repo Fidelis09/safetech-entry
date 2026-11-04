@@ -26,7 +26,7 @@ def analise(auditoria):
     parametros = ParametrosAnalise(
         setor="Canteiro de obras",
         exigidos=("capacete", "colete"),
-        modo_deteccao=config.MODO_ROSTO,
+        modo_deteccao=config.MODO_CATRACA,
         # Classifica bem rápido, para o teste não demorar
         intervalo_classificacao=0.05,
     )
@@ -35,7 +35,7 @@ def analise(auditoria):
 
     analisador = Analisador(
         CameraFalsa(),
-        {config.MODO_ROSTO: DetectorFalso([(50, 50, 200, 400), (300, 60, 450, 420)])},
+        {config.MODO_CATRACA: DetectorFalso([(50, 50, 200, 400), (300, 60, 450, 420)])},
         classificador,
         auditoria,
         parametros,

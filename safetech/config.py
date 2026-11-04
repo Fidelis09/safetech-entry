@@ -41,9 +41,9 @@ URL_MODELO_ROSTO = (
     "face_detection_yunet/face_detection_yunet_2023mar.onnx"
 )
 
-# Detector de corpo inteiro (YOLOX), usado no modo "corpo". O arquivo
+# Detector de corpo inteiro (YOLOX), usado no modo "vigilancia". O arquivo
 # tem cerca de 35 MB e não vai para o repositório: é baixado à parte.
-# Sem ele o programa funciona normalmente, só com o modo "rosto".
+# Sem ele o programa funciona normalmente, só com o modo "catraca".
 ARQUIVO_MODELO_CORPO = PASTA_MODELOS / "object_detection_yolox_2022nov.onnx"
 
 URL_MODELO_CORPO = (
@@ -199,6 +199,49 @@ RTSP_POR_TCP = True
 
 
 # ============================================================
+# CATRACA DE DEMONSTRAÇÃO (ESP32 pelo cabo USB)
+# ============================================================
+#
+# A maquete de catraca (pasta catraca_esp32/) pode receber o status
+# deste programa pelo cabo USB. O programa escreve uma linha de texto
+# na porta serial algumas vezes por segundo; o ESP32 move a cancela.
+#
+# Também funciona pelo Wi-Fi (o ESP32 pergunta ao painel web). Os dois
+# caminhos podem estar ligados ao mesmo tempo: o ESP32 usa o cabo
+# enquanto ele estiver mandando dados e, se o cabo sair, tenta o Wi-Fi.
+#
+# Com a porta aberta aqui, a Arduino IDE não consegue gravar a placa
+# nem abrir o Monitor Serial. Para gravar, feche o programa ou ponha
+# CATRACA_SERIAL_ATIVA em False.
+# ============================================================
+
+# Liga ou desliga o envio pelo cabo. Sem ESP32 plugado não faz mal:
+# o programa só fica procurando a placa em segundo plano.
+CATRACA_SERIAL_ATIVA = True
+
+# Porta do ESP32 (ex.: "COM3"). Vazio = procurar sozinho a primeira
+# placa ESP32 encontrada no USB.
+CATRACA_PORTA = ""
+
+# Velocidade da comunicação. Precisa ser igual à do firmware
+# (VELOCIDADE_SERIAL no config.h da catraca).
+CATRACA_VELOCIDADE_SERIAL = 115200
+
+# De quanto em quanto tempo o status é enviado. 0,3 s deixa a cancela
+# reagir rápido. O ESP32 considera o programa perdido se passar de
+# TEMPO_SEM_RESPOSTA_MS (3 s no firmware) sem receber nada.
+CATRACA_INTERVALO_ENVIO_SEG = 0.3
+
+# Quanto tempo esperar antes de procurar o ESP32 de novo, quando ele
+# não foi encontrado ou a porta estava ocupada.
+CATRACA_INTERVALO_PROCURA_SEG = 2.0
+
+# Tempo máximo para uma escrita no cabo. Passou disso, a porta é
+# considerada com problema e o programa volta a procurá-la.
+CATRACA_TEMPO_LIMITE_ESCRITA_SEG = 1.0
+
+
+# ============================================================
 # DETECÇÃO E RASTREAMENTO DE PESSOAS
 # ============================================================
 
@@ -228,25 +271,71 @@ MAXIMO_CANDIDATOS_ROSTO = 5000
 # Confiança mínima (0 a 1) para aceitar um rosto detectado
 CONFIANCA_MINIMA_ROSTO = 0.7
 
-# --- Modo de detecção ------------------------------------------
+# --- Modo de operação ------------------------------------------
 #
-# Como as pessoas são encontradas na imagem. O usuário alterna na
-# tela, e a escolha fica salva.
+# O sistema trabalha de dois jeitos. O usuário alterna na tela, e a
+# escolha fica salva.
 #
-#   "rosto" -> rápido; para catraca (pessoa perto e de frente)
-#   "corpo" -> mais lento; para câmera geral (pessoas de costas, de
-#              lado, andando e se cruzando)
-MODO_ROSTO = "rosto"
-MODO_CORPO = "corpo"
+#   "catraca"    -> controle de ACESSO: uma pessoa por vez, perto da
+#                   câmera e de frente. Acha a pessoa pelo ROSTO
+#                   (rápido). A decisão é LIBERADO ou NEGADO, e a
+#                   catraca física (ESP32) abre ou fica fechada.
+#
+#   "vigilancia" -> fiscalização de uma ÁREA: câmera geral, várias
+#                   pessoas de costas, de lado, andando e se cruzando.
+#                   Acha a pessoa pelo CORPO INTEIRO (mais lento). Não
+#                   há acesso a liberar: só se verifica se cada pessoa
+#                   está EM CONFORMIDADE (com os EPIs exigidos) e se
+#                   registra. A catraca física fica desligada.
+#
+# A regra de decisão é a mesma nos dois (os EPIs exigidos no setor);
+# muda o detector, o que se mostra e se a catraca obedece.
+MODO_CATRACA = "catraca"
+MODO_VIGILANCIA = "vigilancia"
 
 # chave -> nome mostrado na tela
 MODOS_DETECCAO = {
-    MODO_ROSTO: "Rosto",
-    MODO_CORPO: "Corpo",
+    MODO_CATRACA: "Catraca",
+    MODO_VIGILANCIA: "Vigilância",
+}
+
+# Nomes usados por versões anteriores do programa (no preferencias.json),
+# convertidos para os atuais ao carregar
+MODOS_ANTIGOS = {
+    "rosto": MODO_CATRACA,
+    "corpo": MODO_VIGILANCIA,
 }
 
 # Modo usado na primeira vez que o programa abre
-MODO_DETECCAO_PADRAO = MODO_ROSTO
+MODO_DETECCAO_PADRAO = MODO_CATRACA
+
+# Textos de cada modo. "ok" é quem está com todos os EPIs exigidos;
+# "irregular" é quem não está.
+#
+#   resultado_*  -> tabela de auditoria, relatório e painel web
+#   faixa_*      -> faixa de status grande da tela
+#   palavra_*    -> palavra desenhada no vídeo, junto da caixa (sem
+#                   acento: a fonte do OpenCV não tem acentos)
+TEXTOS_POR_MODO = {
+    MODO_CATRACA: {
+        "resultado_ok": "Liberado",
+        "resultado_irregular": "Negado",
+        "faixa_ok": "ACESSO LIBERADO",
+        "faixa_irregular": "ACESSO NEGADO",
+        "palavra_ok": "OK",
+        "palavra_irregular": "NEGADO",
+        "lugar": "na frente da câmera",
+    },
+    MODO_VIGILANCIA: {
+        "resultado_ok": "Conforme",
+        "resultado_irregular": "Não conforme",
+        "faixa_ok": "EM CONFORMIDADE",
+        "faixa_irregular": "NÃO CONFORME",
+        "palavra_ok": "OK",
+        "palavra_irregular": "SEM EPI",
+        "lugar": "na área",
+    },
+}
 
 # --- Detector de corpo -----------------------------------------
 

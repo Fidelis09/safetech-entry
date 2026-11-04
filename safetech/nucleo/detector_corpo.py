@@ -1,5 +1,5 @@
 """
-Detector de pessoas pelo CORPO INTEIRO (modo "corpo").
+Detector de pessoas pelo CORPO INTEIRO (usado no modo "vigilancia").
 
 Usa o YOLOX, uma rede de detecção de objetos treinada para reconhecer
 80 tipos de coisa (base COCO); aqui só interessa a classe "pessoa".

@@ -29,7 +29,7 @@ from urllib.parse import unquote, urlsplit
 import cv2
 
 from safetech import config
-from safetech.nucleo import anotacao
+from safetech.nucleo import anotacao, modos
 from safetech.nucleo.epis import nome_do_epi
 from safetech.nucleo.tipos import EstadoCena
 
@@ -110,11 +110,28 @@ class ServidorWeb:
 
         frame, estado = self._ler_ao_vivo()
 
+        textos = modos.textos(estado.modo)
+
+        # Título da faixa já no texto do modo, para a página não
+        # precisar saber o que é "liberado" na catraca ou na vigilância
+        titulos = {
+            "liberado": textos["faixa_ok"],
+            "negado": textos["faixa_irregular"],
+            "analisando": "ANALISANDO",
+            "sem_pessoas": "AGUARDANDO",
+        }
+
         return {
             # False quando o painel roda sem o aplicativo (só histórico)
             "disponivel": self._fonte_ao_vivo is not None,
             "camera_ativa": frame is not None,
             "acesso": estado.acesso.value,
+            # Modo de operação: "catraca" ou "vigilancia". A catraca
+            # ESP32 (pelo Wi-Fi) fica fechada na vigilância.
+            "modo": modos.modo_valido(estado.modo),
+            "nome_modo": modos.nome_do_modo(estado.modo),
+            "titulo": titulos[estado.acesso.value],
+            "lugar": textos["lugar"],
             # O que está sendo fiscalizado (o painel só mostra; quem
             # escolhe o setor é o operador, no aplicativo)
             "setor": estado.setor,
@@ -168,7 +185,16 @@ class ServidorWeb:
             "hoje": _totalizar(registros_hoje),
             "geral": _totalizar(registros),
             "por_hora": por_hora,
-            "eventos": [asdict(registro) for registro in recentes],
+            # Cada evento leva também o resultado já em texto, conforme o
+            # modo em que aconteceu ("Liberado" ou "Conforme", por exemplo)
+            "eventos": [
+                {
+                    **asdict(registro),
+                    "resultado": modos.resultado(registro.modo, registro.liberado == "SIM"),
+                    "nome_modo": modos.nome_do_modo(registro.modo),
+                }
+                for registro in recentes
+            ],
         }
 
     def imagem_ao_vivo(self):
@@ -180,7 +206,7 @@ class ServidorWeb:
             return None
 
         # Cópia: o frame original é compartilhado com as outras threads
-        imagem = anotacao.desenhar_pessoas(frame.copy(), estado.pessoas)
+        imagem = anotacao.desenhar_pessoas(frame.copy(), estado.pessoas, modo=estado.modo)
 
         sucesso, dados = cv2.imencode(".jpg", imagem, [cv2.IMWRITE_JPEG_QUALITY, 80])
 

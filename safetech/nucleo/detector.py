@@ -1,15 +1,15 @@
 """
 Escolha do detector de pessoas.
 
-O sistema tem duas formas de encontrar as pessoas na imagem, e o
-usuário alterna entre elas na tela:
+Cada modo de operação usa uma forma de encontrar as pessoas na imagem
+(o usuário alterna entre eles na tela):
 
-    modo "rosto" -> detector_rosto.py (YuNet). Rápido. Para catraca:
-                    pessoa perto da câmera e de frente.
+    modo "catraca"    -> detector_rosto.py (YuNet), pelo ROSTO. Rápido.
+                         Pessoa perto da câmera e de frente.
 
-    modo "corpo" -> detector_corpo.py (YOLOX). Mais lento. Para câmera
-                    geral: várias pessoas, de costas, de lado, andando
-                    e se cruzando.
+    modo "vigilancia" -> detector_corpo.py (YOLOX), pelo CORPO INTEIRO.
+                         Mais lento. Câmera geral: várias pessoas, de
+                         costas, de lado, andando e se cruzando.
 
 Os dois detectores têm a mesma "cara" (o método detectar devolve uma
 lista de caixas), então o resto do sistema não precisa saber qual está
@@ -27,7 +27,7 @@ def modo_disponivel(modo) -> bool:
     opções pode oferecer.
     """
 
-    if modo == config.MODO_CORPO:
+    if modo == config.MODO_VIGILANCIA:
         return config.ARQUIVO_MODELO_CORPO.exists()
 
     return config.ARQUIVO_MODELO_ROSTO.exists()
@@ -37,7 +37,7 @@ def criar_detector(modo):
     """Cria (e carrega) o detector do modo pedido."""
 
     # Importados aqui para só carregar o que for usado
-    if modo == config.MODO_CORPO:
+    if modo == config.MODO_VIGILANCIA:
 
         from safetech.nucleo.detector_corpo import DetectorCorpo
 
@@ -58,9 +58,9 @@ def criar_detectores() -> dict:
     estiver na pasta.
     """
 
-    detectores = {config.MODO_ROSTO: criar_detector(config.MODO_ROSTO)}
+    detectores = {config.MODO_CATRACA: criar_detector(config.MODO_CATRACA)}
 
-    if modo_disponivel(config.MODO_CORPO):
-        detectores[config.MODO_CORPO] = criar_detector(config.MODO_CORPO)
+    if modo_disponivel(config.MODO_VIGILANCIA):
+        detectores[config.MODO_VIGILANCIA] = criar_detector(config.MODO_VIGILANCIA)
 
     return detectores

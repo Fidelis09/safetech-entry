@@ -3,7 +3,9 @@ Painel de auditoria (lado direito da janela).
 
 Mostra, na mesma tela do vídeo:
 
-    - cartões com os totais (eventos, liberados, negados, taxa de liberação);
+    - cartões com os totais (eventos, conformes, irregulares, taxa de
+      conformidade). "Conforme" vale para os dois modos: na catraca é
+      quem foi liberado; na vigilância, quem estava com todos os EPIs;
     - filtros (por texto e por resultado);
     - a tabela de eventos, atualizada ao vivo, com ordenação por coluna;
     - a foto de evidência do evento selecionado;
@@ -24,6 +26,7 @@ from PIL import Image, ImageTk
 
 from safetech import config
 from safetech.interface.tema import CORES, FONTES
+from safetech.nucleo import modos
 
 
 # Colunas da tabela: (campo do registro, título exibido, largura, alinhamento)
@@ -31,10 +34,13 @@ COLUNAS_TABELA = [
     ("timestamp", "Data e hora", 145, "w"),
     ("pessoa", "Pessoa", 60, "center"),
     ("setor", "Setor", 130, "w"),
-    ("faltando", "Faltando", 140, "w"),
-    ("liberado", "Acesso", 80, "center"),
+    ("faltando", "Faltando", 130, "w"),
+    ("modo", "Modo", 80, "center"),
+    ("liberado", "Resultado", 95, "center"),
 ]
 
+# Filtro por resultado: o valor é o da coluna "liberado" do CSV
+# (SIM = conforme / liberado, NAO = irregular / negado)
 FILTRO_TODOS = "todos"
 FILTRO_LIBERADOS = "SIM"
 FILTRO_NEGADOS = "NAO"
@@ -148,9 +154,10 @@ class PainelAuditoria(ttk.Frame):
         linha.grid(row=1, column=0, sticky="ew", pady=(0, 12))
 
         self._valor_total = self._criar_indicador(linha, 0, "Eventos", CORES["texto"])
-        self._valor_liberados = self._criar_indicador(linha, 1, "Liberados", CORES["sucesso_texto"])
-        self._valor_negados = self._criar_indicador(linha, 2, "Negados", CORES["perigo_texto"])
-        self._valor_taxa = self._criar_indicador(linha, 3, "Liberação", CORES["texto"])
+        # Nomes que servem aos dois modos (catraca e vigilância)
+        self._valor_liberados = self._criar_indicador(linha, 1, "Conformes", CORES["sucesso_texto"])
+        self._valor_negados = self._criar_indicador(linha, 2, "Irregulares", CORES["perigo_texto"])
+        self._valor_taxa = self._criar_indicador(linha, 3, "Conformidade", CORES["texto"])
 
     def _criar_indicador(self, pai, coluna, titulo, cor_valor):
         """Cria um cartão de indicador; devolve o rótulo do valor."""
@@ -175,8 +182,8 @@ class PainelAuditoria(ttk.Frame):
         # Botões que funcionam como abas: só um fica selecionado
         for texto, valor in (
             ("Todos", FILTRO_TODOS),
-            ("Liberados", FILTRO_LIBERADOS),
-            ("Negados", FILTRO_NEGADOS),
+            ("Conformes", FILTRO_LIBERADOS),
+            ("Irregulares", FILTRO_NEGADOS),
         ):
 
             ttk.Radiobutton(
@@ -418,7 +425,9 @@ class PainelAuditoria(ttk.Frame):
             registro.pessoa,
             registro.setor,
             registro.faltando or "-",
-            "Liberado" if liberado else "Negado",
+            modos.nome_do_modo(registro.modo),
+            # "Liberado"/"Negado" na catraca; "Conforme"/"Não conforme" na vigilância
+            modos.resultado(registro.modo, liberado),
         ]
 
         linha = self._tabela.insert(
@@ -478,7 +487,8 @@ class PainelAuditoria(ttk.Frame):
 
         self._rotulo_detalhes.config(
             text=(
-                f"{evento}   |   Exigidos: {registro.exigidos or 'nenhum'}\n"
+                f"{evento}   |   Modo: {modos.nome_do_modo(registro.modo)}   |   "
+                f"Exigidos: {registro.exigidos or 'nenhum'}\n"
                 f"Confiança: {registro.confiancas or '-'}"
             )
         )

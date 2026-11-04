@@ -102,6 +102,11 @@ class EstadoCena:
     # Quantas análises por segundo a linha de detecção está fazendo
     analises_por_segundo: float = 0.0
 
+    # Modo de operação: config.MODO_CATRACA ou config.MODO_VIGILANCIA.
+    # Define como o resultado é chamado (liberado/negado ou conforme/
+    # não conforme) e se a catraca física obedece.
+    modo: str = ""
+
 
 # ============================================================
 # UMA LINHA DO LOG DE AUDITORIA
@@ -133,11 +138,16 @@ class RegistroAuditoria:
     # Confiança de cada EPI, ex.: "Capacete 97%, Luvas 12%"
     confiancas: str
 
-    # "SIM" ou "NAO"
+    # "SIM" ou "NAO": a pessoa estava com todos os EPIs exigidos?
+    # (na catraca, "liberado"; na vigilância, "em conformidade")
     liberado: str
 
     # Nome do arquivo da foto de evidência (dentro de auditoria/imagens)
     imagem: str
+
+    # Modo de operação no momento: "catraca" ou "vigilancia". Diz se
+    # o resultado é lido como liberado/negado ou conforme/não conforme.
+    modo: str
 
     def como_linha(self):
         """Valores na mesma ordem das colunas do CSV."""
@@ -152,4 +162,5 @@ class RegistroAuditoria:
             self.confiancas,
             self.liberado,
             self.imagem,
+            self.modo,
         ]

@@ -46,7 +46,7 @@ class ParametrosAnalise:
     setor: str = config.SETOR_PADRAO
     exigidos: tuple = tuple(config.SETORES[config.SETOR_PADRAO])
 
-    # Como as pessoas são encontradas: config.MODO_ROSTO ou config.MODO_CORPO
+    # Modo de operação: config.MODO_CATRACA (acha pelo rosto) ou config.MODO_VIGILANCIA (pelo corpo)
     modo_deteccao: str = config.MODO_DETECCAO_PADRAO
 
 
@@ -183,7 +183,7 @@ class Analisador:
             if frame is None:
 
                 self._rastreador.limpar()
-                self._publicar(EstadoCena())
+                self._publicar(EstadoCena(modo=self._parametros.modo_deteccao))
 
                 ultimo_numero_frame = -1
 
@@ -384,6 +384,9 @@ class Analisador:
             setor=setor,
             exigidos=exigidos,
             analises_por_segundo=analises_por_segundo,
+            # O modo em uso de fato (o pedido na tela pode não ter
+            # detector carregado: veja _detector_do_modo)
+            modo=self._modo_em_uso or self._parametros.modo_deteccao,
         )
 
     # ============================================================
@@ -441,7 +444,7 @@ class Analisador:
             # Foto de evidência: o frame inteiro (contexto) com a
             # pessoa em questão destacada. É uma CÓPIA, porque o
             # frame original é compartilhado com a interface.
-            evidencia = anotacao.desenhar_pessoas(frame.copy(), [pessoa])
+            evidencia = anotacao.desenhar_pessoas(frame.copy(), [pessoa], modo=self._modo_em_uso)
 
             registro = self._auditoria.registrar(
                 evento=evento,
@@ -452,6 +455,7 @@ class Analisador:
                 faltando=pessoa.faltando,
                 liberado=liberado,
                 imagem_bgr=evidencia,
+                modo=self._modo_em_uso,
             )
 
             rastro.decisao_registrada = liberado

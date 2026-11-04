@@ -24,6 +24,7 @@ import shutil
 from datetime import datetime
 
 from safetech import config
+from safetech.nucleo import modos
 
 
 NOME_EVENTO = {
@@ -119,12 +120,20 @@ def _copiar_foto(registro, pasta_imagens, pasta, relativo):
 # ============================================================
 
 def _resultado(registro):
-    """(texto, classe CSS) da decisão do evento."""
+    """
+    (texto, classe CSS) da decisão do evento.
+
+    O texto depende do modo em que o evento aconteceu: "ACESSO
+    LIBERADO" / "ACESSO NEGADO" na catraca; "EM CONFORMIDADE" /
+    "NÃO CONFORME" na vigilância.
+    """
+
+    textos = modos.textos(registro.modo)
 
     if registro.liberado == "SIM":
-        return "ACESSO LIBERADO", "ok"
+        return textos["faixa_ok"], "ok"
 
-    return "ACESSO NEGADO", "negado"
+    return textos["faixa_irregular"], "negado"
 
 
 def _lista_confiancas(registro) -> str:
@@ -172,7 +181,8 @@ def _montar_html(registro, foto, outros):
         ("Setor", registro.setor or "-"),
         ("EPIs exigidos", registro.exigidos or "nenhum"),
         ("Faltando", registro.faltando or "nada"),
-        ("Acesso", "Liberado" if registro.liberado == "SIM" else "Negado"),
+        ("Modo", modos.nome_do_modo(registro.modo)),
+        ("Resultado", modos.resultado(registro.modo, registro.liberado == "SIM")),
         ("Arquivo da foto", registro.imagem or "-"),
     ]
 
@@ -194,7 +204,7 @@ def _montar_html(registro, foto, outros):
         bloco_outros = f"""
 <h2>Outros eventos no mesmo momento</h2>
 <table class="outros">
-<tr><th>Foto</th><th>Pessoa</th><th>Acesso</th><th>Faltando</th><th>Confiança</th></tr>
+<tr><th>Foto</th><th>Pessoa</th><th>Resultado</th><th>Faltando</th><th>Confiança</th></tr>
 {linhas_outros}
 </table>"""
 
@@ -268,7 +278,7 @@ def _linha_outro(registro, foto) -> str:
     return (
         f"<tr><td>{miniatura}</td>"
         f"<td><b>{e(registro.pessoa)}</b></td>"
-        f'<td class="{classe}">{"Liberado" if registro.liberado == "SIM" else "Negado"}</td>'
+        f'<td class="{classe}">{e(modos.resultado(registro.modo, registro.liberado == "SIM"))}</td>'
         f"<td>{e(registro.faltando or 'nada')}</td>"
         f"<td>{_lista_confiancas(registro)}</td></tr>"
     )

@@ -32,16 +32,16 @@ def test_salvar_e_carregar_fiscalizacao(tmp_path):
 
     arquivo = tmp_path / "preferencias.json"
 
-    preferencias.salvar("Laboratório", ["oculos", "luvas"], config.MODO_CORPO, arquivo)
+    preferencias.salvar("Laboratório", ["oculos", "luvas"], config.MODO_VIGILANCIA, arquivo)
 
-    assert preferencias.carregar(arquivo) == ("Laboratório", ["oculos", "luvas"], config.MODO_CORPO)
+    assert preferencias.carregar(arquivo) == ("Laboratório", ["oculos", "luvas"], config.MODO_VIGILANCIA)
 
 
 def test_epi_que_nao_existe_mais_e_descartado(tmp_path):
 
     arquivo = tmp_path / "preferencias.json"
 
-    preferencias.salvar("X", ["capacete", "botas"], config.MODO_ROSTO, arquivo)
+    preferencias.salvar("X", ["capacete", "botas"], config.MODO_CATRACA, arquivo)
 
     assert preferencias.carregar(arquivo)[1] == ["capacete"]
 
@@ -51,7 +51,7 @@ def test_cada_item_salvo_preserva_os_outros(tmp_path):
     arquivo = tmp_path / "preferencias.json"
 
     preferencias.salvar_cameras_ip([("Portaria", "rtsp://1.2.3.4/s")], arquivo)
-    preferencias.salvar("Laboratório", ["oculos"], config.MODO_ROSTO, arquivo)
+    preferencias.salvar("Laboratório", ["oculos"], config.MODO_CATRACA, arquivo)
     preferencias.salvar_fonte_camera(2, arquivo)
 
     dados = json.loads(arquivo.read_text(encoding="utf-8"))

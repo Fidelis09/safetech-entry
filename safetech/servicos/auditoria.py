@@ -15,6 +15,10 @@ e cada linha tem a foto do momento exato da decisão.
 Cada linha guarda também o SETOR fiscalizado, os EPIs que ele exigia e
 quais deles estavam faltando: dá para saber não só que o acesso foi
 negado, mas por quê.
+
+E guarda o MODO de operação ("catraca" ou "vigilancia"): na catraca o
+resultado é lido como liberado/negado; na vigilância, como conforme/
+não conforme. A coluna "liberado" (SIM/NAO) vale para os dois.
 """
 
 import csv
@@ -24,6 +28,7 @@ from datetime import datetime
 import cv2
 
 from safetech import config
+from safetech.nucleo import modos
 from safetech.nucleo.epis import nome_do_epi, nomes_dos_epis
 from safetech.nucleo.tipos import RegistroAuditoria
 
@@ -38,7 +43,16 @@ COLUNAS = [
     "confiancas",
     "liberado",
     "imagem",
+    "modo",
 ]
+
+# Colunas da versão anterior (sem "modo"). Um log nesse formato é
+# convertido para o atual: os eventos ganham o modo "catraca", que era
+# o único sentido (liberado/negado) que existia.
+COLUNAS_SEM_MODO = COLUNAS[:-1]
+
+# Log das linhas excluídas: as mesmas colunas e a data da exclusão
+COLUNAS_EXCLUIDOS = COLUNAS + ["excluido_em"]
 
 EVENTO_ENTRADA = "ENTRADA"
 EVENTO_MUDANCA = "MUDANCA"
@@ -79,29 +93,58 @@ class ServicoAuditoria:
         # Um log criado por uma versão anterior do programa tem colunas
         # diferentes. Ele é RENOMEADO (nunca apagado) e um log novo é
         # iniciado no formato atual.
-        if self._arquivo_log.exists() and not self._cabecalho_atual():
+        #
+        # Se for só a versão sem a coluna "modo", os eventos são
+        # COPIADOS para o log novo (com o modo "catraca"): o histórico
+        # continua aparecendo na tela, e o arquivo original fica
+        # guardado intacto.
+        if self._arquivo_log.exists():
 
-            sufixo = datetime.now().strftime("%Y%m%d_%H%M%S")
+            cabecalho = _ler_cabecalho(self._arquivo_log)
 
-            self._arquivo_log.rename(
-                self._arquivo_log.with_name(
-                    f"{self._arquivo_log.stem}_formato_antigo_{sufixo}"
-                    f"{self._arquivo_log.suffix}"
-                )
-            )
+            if cabecalho == COLUNAS_SEM_MODO:
+
+                antigo = _renomear_formato_antigo(self._arquivo_log)
+
+                self._copiar_sem_modo(antigo)
+
+            elif cabecalho != COLUNAS:
+
+                _renomear_formato_antigo(self._arquivo_log)
+
+        # O log dos excluídos segue a mesma regra (sem copiar: ele não
+        # aparece na tela)
+        log_excluidos = self._pasta_excluidos / "log_excluidos.csv"
+
+        if log_excluidos.exists() and _ler_cabecalho(log_excluidos) != COLUNAS_EXCLUIDOS:
+            _renomear_formato_antigo(log_excluidos)
 
         if not self._arquivo_log.exists():
 
             with open(self._arquivo_log, "w", newline="", encoding="utf-8") as arquivo:
                 csv.writer(arquivo).writerow(COLUNAS)
 
-    def _cabecalho_atual(self) -> bool:
-        """True se a primeira linha do CSV é o cabeçalho deste formato."""
+    def _copiar_sem_modo(self, antigo):
+        """Cria o log atual com os eventos de um log sem a coluna "modo"."""
 
-        with open(self._arquivo_log, "r", newline="", encoding="utf-8", errors="replace") as arquivo:
-            primeira_linha = next(csv.reader(arquivo), None)
+        with open(antigo, "r", newline="", encoding="utf-8", errors="replace") as origem:
 
-        return primeira_linha == COLUNAS
+            leitor = csv.reader(origem)
+
+            next(leitor, None)  # cabeçalho antigo
+
+            linhas = [
+                linha + [config.MODO_CATRACA]
+                for linha in leitor
+                if len(linha) == len(COLUNAS_SEM_MODO)
+            ]
+
+        with open(self._arquivo_log, "w", newline="", encoding="utf-8") as destino:
+
+            escritor = csv.writer(destino)
+
+            escritor.writerow(COLUNAS)
+            escritor.writerows(linhas)
 
     # ============================================================
     # GRAVAÇÃO
@@ -117,12 +160,16 @@ class ServicoAuditoria:
         faltando,
         liberado,
         imagem_bgr=None,
+        modo=config.MODO_CATRACA,
     ) -> RegistroAuditoria:
         """
         Grava um evento no CSV (e a foto de evidência, se houver).
 
         exigidos / faltando -> chaves dos EPIs, ex.: ("capacete", "luvas")
         itens               -> ResultadoEPI de cada EPI avaliado
+        liberado            -> True se a pessoa estava com tudo o que o
+                               setor exige
+        modo                -> "catraca" ou "vigilancia"
         """
 
         agora = datetime.now()
@@ -150,6 +197,7 @@ class ServicoAuditoria:
             ),
             liberado="SIM" if liberado else "NAO",
             imagem=nome_imagem,
+            modo=modos.modo_valido(modo),
         )
 
         # A foto e a linha do CSV são gravadas juntas, dentro da trava:
@@ -289,7 +337,7 @@ class ServicoAuditoria:
                 escritor = csv.writer(arquivo)
 
                 if novo:
-                    escritor.writerow(COLUNAS + ["excluido_em"])
+                    escritor.writerow(COLUNAS_EXCLUIDOS)
 
                 escritor.writerow(
                     linha_procurada + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
@@ -340,3 +388,29 @@ class ServicoAuditoria:
                         registros.append(RegistroAuditoria(*linha))
 
         return registros
+
+
+# ============================================================
+# FUNÇÕES DE APOIO
+# ============================================================
+
+def _ler_cabecalho(caminho):
+    """A primeira linha do CSV (ou None se o arquivo estiver vazio)."""
+
+    with open(caminho, "r", newline="", encoding="utf-8", errors="replace") as arquivo:
+        return next(csv.reader(arquivo), None)
+
+
+def _renomear_formato_antigo(caminho):
+    """
+    Renomeia um CSV de formato antigo (nunca apaga) e devolve o novo
+    caminho: log_auditoria.csv -> log_auditoria_formato_antigo_<data>.csv
+    """
+
+    sufixo = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    novo = caminho.with_name(f"{caminho.stem}_formato_antigo_{sufixo}{caminho.suffix}")
+
+    caminho.rename(novo)
+
+    return novo

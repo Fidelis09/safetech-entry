@@ -15,6 +15,7 @@ garantir duas regras:
 """
 
 import tempfile
+import time
 import tkinter as tk
 from pathlib import Path
 
@@ -41,6 +42,10 @@ config.ARQUIVO_PREFERENCIAS = PASTA_TEMPORARIA / "preferencias.json"
 # O painel web só sobe quando um teste pede, e só para este computador
 # (127.0.0.1): assim o firewall do Windows não pergunta nada.
 config.PAINEL_WEB_ATIVO = False
+
+# Os testes NUNCA abrem a porta USB de um ESP32 de verdade: a janela
+# não deve sair procurando e tomando a porta da catraca do usuário.
+config.CATRACA_SERIAL_ATIVA = False
 config.PAINEL_WEB_HOST = "127.0.0.1"
 
 
@@ -61,6 +66,31 @@ def auditoria(tmp_path):
     )
 
 
+def criar_janela_tk(tentativas=5):
+    """
+    Cria a janela do Tk, tentando de novo se ela falhar ao abrir.
+
+    No Python da Microsoft Store, criar muitas janelas seguidas às vezes
+    falha ao ler os arquivos do próprio Tk ("Can't find a usable
+    init.tcl" ou "tk.tcl", com "No error"). É uma falha passageira do
+    Windows, não do programa: na tentativa seguinte, abre normalmente.
+    """
+
+    for tentativa in range(tentativas):
+
+        try:
+            return tk.Tk()
+
+        except tk.TclError as erro:
+
+            passageira = "usable init.tcl" in str(erro) or "usable tk.tcl" in str(erro)
+
+            if not passageira or tentativa == tentativas - 1:
+                raise
+
+            time.sleep(0.2)
+
+
 @pytest.fixture
 def raiz():
     """
@@ -71,7 +101,7 @@ def raiz():
 
     from safetech.interface import tema
 
-    janela = tk.Tk()
+    janela = criar_janela_tk()
     janela.withdraw()
 
     tema.aplicar_tema(janela, 1.0)

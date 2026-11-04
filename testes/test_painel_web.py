@@ -40,8 +40,14 @@ def painel(auditoria):
         imagem_bgr=np.zeros((40, 40, 3), np.uint8),
     )
 
-    servidor = ServidorWeb(auditoria, None, host="127.0.0.1", porta=porta_livre())
+    porta = porta_livre()
+
+    servidor = ServidorWeb(auditoria, None, host="127.0.0.1", porta=porta)
     servidor.iniciar()
+
+    # 127.0.0.1, e não "localhost": no Windows, "localhost" tenta
+    # primeiro o IPv6 e perde uns 2 segundos em cada pedido.
+    servidor.endereco_de_teste = f"http://127.0.0.1:{porta}"
 
     yield servidor
 
@@ -51,7 +57,7 @@ def painel(auditoria):
 def pedir(servidor, caminho, metodo="GET", login=True):
     """Faz um pedido ao painel; devolve (código HTTP, corpo)."""
 
-    pedido = urllib.request.Request(servidor.endereco() + caminho, method=metodo)
+    pedido = urllib.request.Request(servidor.endereco_de_teste + caminho, method=metodo)
 
     if login:
 

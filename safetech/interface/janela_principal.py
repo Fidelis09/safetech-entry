@@ -30,12 +30,13 @@ from safetech.interface.dialogo_camera_ip import pedir_camera_ip
 from safetech.interface.painel_auditoria import PainelAuditoria
 from safetech.interface.painel_monitoramento import PainelMonitoramento
 from safetech.interface.tema import CORES
-from safetech.nucleo import anotacao, detector, epis
+from safetech.nucleo import anotacao, detector, epis, modos
 from safetech.nucleo.tipos import EstadoCena, StatusAcesso, StatusPessoa
 from safetech.servicos import busca_cameras, importacao, preferencias, relatorio
 from safetech.servicos.analisador import Analisador, ParametrosAnalise
 from safetech.servicos.auditoria import ServicoAuditoria
 from safetech.servicos.camera import Camera, EstadoCamera, eh_endereco_ip
+from safetech.servicos.catraca_serial import CatracaSerial
 from safetech.servicos.dataset import ColetorDataset
 from safetech.web.servidor import ServidorWeb
 
@@ -81,7 +82,7 @@ class JanelaPrincipal:
 
         # Se o modo salvo não estiver mais disponível, volta para o rosto
         if modo_deteccao not in self._modos_disponiveis:
-            modo_deteccao = config.MODO_ROSTO
+            modo_deteccao = config.MODO_CATRACA
 
         self._parametros = ParametrosAnalise(
             setor=setor,
@@ -124,6 +125,9 @@ class JanelaPrincipal:
 
         self._servidor_web = None
         self._iniciar_painel_web()
+
+        self._catraca = None
+        self._iniciar_catraca()
 
         self._raiz.protocol("WM_DELETE_WINDOW", self._ao_fechar)
 
@@ -221,6 +225,10 @@ class JanelaPrincipal:
         self._rotulo_painel_web = ttk.Label(rodape, text="", style="Suave.TLabel", cursor="hand2")
         self._rotulo_painel_web.pack(side="left", padx=(0, 20))
 
+        # Situação da catraca de demonstração (ESP32 pelo cabo USB)
+        self._rotulo_catraca = ttk.Label(rodape, text="", style="Suave.TLabel")
+        self._rotulo_catraca.pack(side="left", padx=(0, 20))
+
         self._rotulo_aviso = ttk.Label(rodape, text="", style="TLabel")
         self._rotulo_aviso.pack(side="left")
 
@@ -297,6 +305,45 @@ class JanelaPrincipal:
         return frame, self._analisador.estado()
 
     # ============================================================
+    # CATRACA DE DEMONSTRAÇÃO (ESP32 pelo cabo USB)
+    # ============================================================
+
+    def _iniciar_catraca(self):
+        """
+        Começa a enviar o status à catraca pelo cabo USB.
+
+        Sem o ESP32 plugado não faz mal: a thread só fica procurando a
+        placa em segundo plano. Se a biblioteca pyserial não estiver
+        instalada, o programa segue normalmente, só sem a catraca.
+        """
+
+        if not config.CATRACA_SERIAL_ATIVA:
+            return
+
+        try:
+            import serial  # noqa: F401  (só para saber se está instalada)
+
+        except ImportError:
+
+            self._rotulo_catraca.config(text="Catraca: instale o pyserial (veja o README)")
+            return
+
+        self._catraca = CatracaSerial(self._ler_ao_vivo)
+        self._catraca.iniciar()
+
+    def _atualizar_catraca(self):
+        """Mostra na barra de status se a catraca está conectada."""
+
+        if self._catraca is None:
+            return
+
+        texto = self._catraca.situacao
+
+        # Só mexe no rótulo quando o texto muda
+        if texto != self._rotulo_catraca.cget("text"):
+            self._rotulo_catraca.config(text=texto)
+
+    # ============================================================
     # CARGA DA IA (thread em segundo plano)
     # ============================================================
 
@@ -360,7 +407,7 @@ class JanelaPrincipal:
 
         self._analisador.iniciar()
 
-        if not detectores[config.MODO_ROSTO].disponivel:
+        if not detectores[config.MODO_CATRACA].disponivel:
 
             self._avisar(
                 "Detector de rosto não encontrado em 'modelos/': a cena inteira será "
@@ -386,6 +433,7 @@ class JanelaPrincipal:
                 self._cameras_encontradas = None
 
             self._verificar_carga()
+            self._atualizar_catraca()
 
             if self._analisador is not None:
 
@@ -499,7 +547,7 @@ class JanelaPrincipal:
         # altera o frame original (que é compartilhado com o analisador).
         imagem = cv2.resize(frame, tamanho, interpolation=cv2.INTER_LINEAR)
 
-        anotacao.desenhar_pessoas(imagem, estado.pessoas, escala)
+        anotacao.desenhar_pessoas(imagem, estado.pessoas, escala, modo=estado.modo)
 
         imagem = Image.fromarray(cv2.cvtColor(imagem, cv2.COLOR_BGR2RGB))
 
@@ -538,7 +586,15 @@ class JanelaPrincipal:
 
     @staticmethod
     def _descrever_acesso(estado: EstadoCena):
-        """Transforma o estado da cena em (título, detalhe, cor) para a faixa de status."""
+        """
+        Transforma o estado da cena em (título, detalhe, cor) para a faixa de status.
+
+        Os títulos dependem do modo: na catraca, "ACESSO LIBERADO" /
+        "ACESSO NEGADO"; na vigilância, "EM CONFORMIDADE" / "NÃO
+        CONFORME" (lá não há acesso a liberar).
+        """
+
+        textos = modos.textos(estado.modo)
 
         total = len(estado.pessoas)
 
@@ -553,8 +609,8 @@ class JanelaPrincipal:
         if estado.acesso is StatusAcesso.LIBERADO:
 
             return (
-                "ACESSO LIBERADO",
-                f"{total} {plural} na imagem, todas em conformidade.\n{exigencia}",
+                textos["faixa_ok"],
+                f"{total} {plural} {textos['lugar']}, todas com os EPIs exigidos.\n{exigencia}",
                 CORES["sucesso"],
             )
 
@@ -576,7 +632,7 @@ class JanelaPrincipal:
             )
 
             return (
-                "ACESSO NEGADO",
+                textos["faixa_irregular"],
                 f"{len(negadas)} de {total} {plural} sem EPI exigido. Faltando: {faltas}\n{exigencia}",
                 CORES["perigo"],
             )
@@ -585,13 +641,13 @@ class JanelaPrincipal:
 
             return (
                 "ANALISANDO",
-                f"{total} {plural} na imagem, verificando os equipamentos...\n{exigencia}",
+                f"{total} {plural} {textos['lugar']}, verificando os equipamentos...\n{exigencia}",
                 CORES["alerta"],
             )
 
         return (
             "AGUARDANDO",
-            f"Nenhuma pessoa na frente da câmera.\n{exigencia}",
+            f"Nenhuma pessoa {textos['lugar']}.\n{exigencia}",
             CORES["neutro"],
         )
 
@@ -774,32 +830,35 @@ class JanelaPrincipal:
 
     def _mudar_modo_deteccao(self, modo):
         """
-        Chamado quando o usuário alterna entre "Rosto" e "Corpo".
+        Chamado quando o usuário alterna entre "Catraca" e "Vigilância".
 
         A troca vale já no próximo ciclo de análise, sem reiniciar o
         programa nem a câmera. As pessoas que estavam sendo
         acompanhadas são esquecidas (o analisador cuida disso), porque
-        a caixa de um modo não corresponde à do outro.
+        a caixa de um modo (rosto) não corresponde à do outro (corpo).
+
+        A catraca física acompanha sozinha: o envio pelo cabo e o
+        painel web informam o modo, e na vigilância ela fica fechada.
         """
 
         self._parametros.modo_deteccao = modo
 
         self._salvar_preferencias()
 
-        if modo == config.MODO_CORPO:
+        if modo == config.MODO_VIGILANCIA:
             self._avisar(
-                "Modo corpo: acha pessoas de costas, de lado e se cruzando. "
-                "A análise fica mais lenta.",
+                "Modo vigilância: verifica se todos na área estão com os EPIs e registra. "
+                "A catraca fica desligada.",
                 segundos=7,
             )
         else:
             self._avisar(
-                "Modo rosto: rápido, para pessoas perto da câmera e de frente.",
+                "Modo catraca: libera ou nega o acesso, uma pessoa por vez, de frente para a câmera.",
                 segundos=7,
             )
 
     def _salvar_preferencias(self):
-        """Grava setor, EPIs exigidos e modo de detecção para a próxima abertura."""
+        """Grava setor, EPIs exigidos e modo de operação para a próxima abertura."""
 
         preferencias.salvar(
             self._parametros.setor,
@@ -940,7 +999,7 @@ class JanelaPrincipal:
         'auditoria/excluidos' (o serviço de auditoria cuida disso).
         """
 
-        resultado = "liberado" if registro.liberado == "SIM" else "negado"
+        resultado = modos.resultado(registro.modo, registro.liberado == "SIM").lower()
 
         confirmou = messagebox.askyesno(
             "Excluir evento",
@@ -1102,6 +1161,9 @@ class JanelaPrincipal:
 
         if self._servidor_web is not None:
             self._servidor_web.parar()
+
+        if self._catraca is not None:
+            self._catraca.parar()
 
         self._raiz.destroy()
 

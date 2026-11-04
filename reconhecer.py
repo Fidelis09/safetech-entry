@@ -67,11 +67,11 @@ def principal():
     print("Carregando a IA...")
 
     classificador = ClassificadorEPI()
-    # Usa o mesmo modo de detecção (rosto ou corpo) escolhido no aplicativo
+    # Usa o mesmo modo (catraca = rosto, vigilância = corpo) escolhido no aplicativo
     _, _, modo = preferencias.carregar()
 
     if not fabrica_de_detectores.modo_disponivel(modo):
-        modo = config.MODO_ROSTO
+        modo = config.MODO_CATRACA
 
     print("Modo de detecção:", config.MODOS_DETECCAO[modo])
 

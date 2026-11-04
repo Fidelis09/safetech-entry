@@ -81,6 +81,26 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 - `requirements.txt` com versões fixas; `requirements-dev.txt` (pytest); `.github/workflows/testes.yml` roda os testes em Windows a cada push (sem TensorFlow).
 - README: corrigidos os dois trechos que diziam que o repositório só trazia o modelo antigo; novas seções de câmera IP, relatório, excluir linha e testes.
 
+### 2.11 Catraca de demonstração com ESP32 (30/10, não commitado)
+- Pasta `catraca_esp32/`: `catraca_esp32.ino`, `config_exemplo.h` (copiar para `config.h`, que fica fora do git) e `LEIA-ME.md` (peças, ligações, instalação, roteiro da apresentação, problemas comuns).
+- O ESP32 lê `/api/ao-vivo` a cada 500 ms com o login do painel; servo (cancela), LEDs verde/amarelo/vermelho, buzzer ativo, OLED SSD1306 e relé (pulso ao abrir). Na dúvida, fecha: falha de rede, programa fechado ou status desconhecido mantêm a cancela fechada.
+- `testes/test_contrato_catraca.py` garante os campos de que a catraca depende. Testes do painel passaram a usar 127.0.0.1 (no Windows, "localhost" perdia ~2 s por pedido): suíte caiu de 35 s para 16 s.
+- **Não compilado**: não há Arduino IDE nem compilador neste computador. Falta compilar, gravar e montar.
+
+### 2.12 Catraca pelo cabo USB, junto com o Wi-Fi (04/11, não commitado)
+- `safetech/servicos/catraca_serial.py`: thread que escreve `ST|acesso|negadas|total|faltando` na porta serial a cada 0,3 s. Acha o ESP32 sozinho (chips CP210x/CH340/Espressif/FTDI) e reconecta se o cabo sair; abre a porta com DTR/RTS desligados para não reiniciar a placa. Ajustes em `config.py` (`CATRACA_*`). A janela mostra "Catraca: COM3 conectada" no rodapé. `pyserial==3.5` entrou no `requirements.txt`.
+- Firmware: aceita cabo e Wi-Fi juntos. Cabo tem prioridade; Wi-Fi só é consultado se `WIFI_ATIVO true` e o cabo não estiver mandando. `WIFI_ATIVO false` por enquanto (o Wi-Fi do dia da apresentação ainda não foi escolhido). Sem dados por 3 s ou "liberado" velho (1,5 s) fecha a cancela.
+- Testado no ESP32 real (COM3): todas as situações, lixo no cabo ignorado, silêncio vai para OFFLINE, e o `CatracaSerial` real. Falta testar o conjunto com o SafeTech completo aberto (câmera + IA) e o Wi-Fi.
+- Testes: 85 passam (`test_catraca_serial.py` novo; `conftest.py` desliga o envio nos testes).
+- O Arduino IDE tem `arduino-cli` embutido: placa ESP32 e bibliotecas já instaladas; firmware gravado com ele.
+
+### 2.13 Modos Catraca e Vigilância (04/11, não commitado)
+- Os modos "Rosto"/"Corpo" viraram **Catraca** (rosto; libera/nega; catraca física obedece) e **Vigilância** (corpo; só verifica conformidade e registra; catraca física desligada). Chaves `catraca`/`vigilancia` em `config.py`; `"rosto"`/`"corpo"` salvos antes são convertidos.
+- Textos de cada modo em `config.TEXTOS_POR_MODO` e `safetech/nucleo/modos.py`. Faixa de status, palavra no vídeo, tabela de auditoria (nova coluna Modo; indicadores "Conformes/Irregulares/Conformidade"), relatório e painel web mostram o texto do modo.
+- Auditoria ganhou a coluna `modo`. Log antigo é convertido (eventos viram `catraca`) e o original fica guardado como `_formato_antigo_`.
+- Catraca: o programa envia `ST|vigilancia|...` pelo cabo e `"modo"` no `/api/ao-vivo`; o firmware tem a situação VIGILANCIA (fechada, LEDs apagados, tela "VIGILANCIA / Catraca desligada"). Gravado e testado no ESP32 real.
+- Testes: 103 (novo `test_modos.py`). Uma vez o Tk falhou ao ler o `init.tcl` (instabilidade do Python da Store); nas rodadas seguintes passou.
+
 ---
 
 ## 3. O que está pela metade

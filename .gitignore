@@ -16,6 +16,10 @@ auditoria/
 # Última seleção de setor feita na tela (preferência de cada computador)
 preferencias.json
 
+# Configuração da catraca ESP32: tem a senha do Wi-Fi e a do painel.
+# Vai para o git só o modelo, catraca_esp32/config_exemplo.h.
+catraca_esp32/config.h
+
 # ============================================================
 # ARQUIVOS LOCAIS
 # ============================================================

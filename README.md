@@ -35,12 +35,14 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - **Várias pessoas ao mesmo tempo** (fila): cada uma recebe uma caixa que a acompanha, com número e o que está faltando.
 - **Decisão estável**: usa a mediana das últimas classificações de cada pessoa, então o status não fica piscando.
 - **Uma foto de evidência por pessoa**: outra só é gravada quando a situação dela muda ou quando é outra pessoa.
-- **Status do acesso** em destaque: liberado (verde), negado (vermelho), analisando (laranja) ou aguardando.
+- **Dois modos de operação**: **Catraca** (libera ou nega o acesso, e a catraca física obedece) e **Vigilância** (verifica se todos numa área estão em conformidade e registra, sem liberar nada).
+- **Status em destaque**: na catraca, liberado (verde) ou negado (vermelho); na vigilância, em conformidade ou não conforme; e analisando (laranja) ou aguardando.
 - **Confiança mínima e intervalo de análise** ajustáveis na tela, com efeito imediato.
 - **Auditoria na mesma tela**: indicadores, filtros, busca, ordenação por coluna e foto de evidência do evento selecionado. Cada evento guarda o setor, o que era exigido e o que faltava.
 - **Relatório de um evento**: um clique gera uma página com todos os dados do momento da linha selecionada, a foto e os outros eventos do mesmo instante.
 - **Excluir linha sem perder o registro**: o evento sai da tabela, mas vai para uma pasta de excluídos, com a data da exclusão.
-- **Testes automatizados**: 63 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
+- **Catraca de demonstração com ESP32**: maquete com cancela (servo), LEDs, bipe e tela que obedece ao sistema pelo Wi-Fi (pasta `catraca_esp32/`).
+- **Testes automatizados**: 103 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
 - **Coleta de dataset rotulada**: marque o que a pessoa está usando e salve, por botão ou atalho de teclado.
 - **Painel web do gerente**, somente leitura: status ao vivo, indicadores, gráfico e fotos pelo navegador, inclusive no celular.
 - **Abertura imediata**: a janela aparece na hora e o modelo de IA carrega em segundo plano.
@@ -69,8 +71,8 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 
    | Arquivo | Para que serve | Origem |
    |---|---|---|
-   | `face_detection_yunet_2023mar.onnx` | Localiza as pessoas pelo rosto (modo rosto) | Baixado uma vez (já vem no repositório) |
-   | `object_detection_yolox_2022nov.onnx` | Localiza as pessoas pelo corpo inteiro (modo corpo) | **Não vem no repositório** (35 MB). Veja [Modo de detecção](#modo-de-detecção-rosto-ou-corpo) |
+   | `face_detection_yunet_2023mar.onnx` | Localiza as pessoas pelo rosto (modo catraca) | Baixado uma vez (já vem no repositório) |
+   | `object_detection_yolox_2022nov.onnx` | Localiza as pessoas pelo corpo inteiro (modo vigilância) | **Não vem no repositório** (35 MB). Veja [Modo de operação](#modo-de-operação-catraca-ou-vigilância) |
    | `modelo_epis.keras` e `epis.json` | Modelo **por EPI** | Já vêm no repositório (treinado com um dataset pequeno); gerados de novo pelo `treinar.py` |
    | `modelo_epi.keras` e `classes.json` | Modelo **antigo** (só "com EPI" / "sem EPI") | Já vêm no repositório |
 
@@ -130,23 +132,30 @@ SETORES = {
 
 O divisor entre os dois painéis pode ser arrastado para dar mais espaço ao vídeo ou à auditoria.
 
-### Modo de detecção: rosto ou corpo
+### Modo de operação: catraca ou vigilância
 
-Na área **Fiscalização**, o seletor **Detectar por** define como as pessoas são encontradas na imagem. A troca vale na hora, sem reiniciar o programa nem a câmera, e a escolha fica salva.
+Na área **Fiscalização**, o seletor **Modo** escolhe como o sistema trabalha. A troca vale na hora, sem reiniciar o programa nem a câmera, e a escolha fica salva.
 
-| Modo | Quando usar | Como encontra a pessoa | Velocidade |
-|---|---|---|---|
-| **Rosto** | Catraca: pessoa perto da câmera e de frente | Pelo rosto; o recorte cobre cabeça, tronco e mãos | Rápido (cerca de 12 análises por segundo) |
-| **Corpo** | Câmera geral: várias pessoas, de costas, de lado, abaixadas, andando e se cruzando | Pelo corpo inteiro, em qualquer posição | Mais lento (cerca de 8 análises por segundo) |
+| | **Catraca** | **Vigilância** |
+|---|---|---|
+| Para quê | Controle de **acesso**: uma pessoa por vez, perto da câmera e de frente | Fiscalização de uma **área**: câmera geral, várias pessoas de costas, de lado, abaixadas, andando e se cruzando |
+| Como acha a pessoa | Pelo **rosto**; o recorte cobre cabeça, tronco e mãos | Pelo **corpo inteiro**, em qualquer posição |
+| Resultado mostrado | **ACESSO LIBERADO** / **ACESSO NEGADO** | **EM CONFORMIDADE** / **NÃO CONFORME** (não há acesso a liberar) |
+| Palavra no vídeo | `OK` / `NEGADO` | `OK` / `SEM EPI` |
+| Catraca física (ESP32) | **Obedece**: abre quando libera | **Desligada**: fechada, LEDs apagados, tela "VIGILANCIA" |
+| Auditoria | Registra cada decisão com foto | Registra igual, com o resultado "Conforme" / "Não conforme" |
+| Velocidade | Rápido (cerca de 12 análises por segundo) | Mais lento (cerca de 8 análises por segundo) |
 
-Numa foto real de um canteiro de obras, o modo rosto encontrou 5 pessoas e o modo corpo, as 7 que estavam visíveis.
+A regra de decisão é a mesma nos dois modos: os EPIs exigidos no setor. Cada evento da auditoria guarda o modo em que aconteceu, então a tabela, o relatório e o painel web mostram o texto certo para cada linha.
+
+Numa foto real de um canteiro de obras, a detecção pelo rosto encontrou 5 pessoas e a pelo corpo, as 7 que estavam visíveis.
 
 O que muda ao trocar de modo:
 
 - **As pessoas são esquecidas e recomeçam.** A caixa de um rosto e a de um corpo inteiro não se correspondem, então quem está na imagem passa a contar como pessoa nova (com um novo evento de entrada na auditoria).
 - **O recorte entregue ao modelo de EPI muda** (cabeça e tronco num modo, corpo inteiro no outro). Para o reconhecimento funcionar bem nos dois, o dataset precisa ter imagens coletadas **nos dois modos**. A coleta e a importação salvam o recorte do modo que estiver selecionado.
 
-O modo corpo depende do arquivo `modelos/object_detection_yolox_2022nov.onnx` (35 MB), que não vai para o repositório. Sem ele, a opção **Corpo** fica desativada. Para baixar (PowerShell, na pasta do projeto):
+O modo vigilância depende do arquivo `modelos/object_detection_yolox_2022nov.onnx` (35 MB), que não vai para o repositório. Sem ele, a opção **Vigilância** fica desativada. Para baixar (PowerShell, na pasta do projeto):
 
 ```powershell
 Invoke-WebRequest -Uri "https://github.com/opencv/opencv_zoo/raw/main/models/object_detection_yolox/object_detection_yolox_2022nov.onnx" -OutFile "modelos/object_detection_yolox_2022nov.onnx"
@@ -215,13 +224,22 @@ Na primeira vez, o Windows pode perguntar se o Python pode aceitar conexões da 
 | Área | Conteúdo |
 |---|---|
 | **Ao vivo** | Imagem atual da câmera com as caixas, o setor em fiscalização e o que ele exige, status da catraca e o que falta para cada pessoa. Atualiza a cada segundo. |
-| **Hoje** | Eventos, liberados, negados e taxa de liberação do dia, com o total do histórico abaixo de cada número. |
+| **Hoje** | Eventos, conformes, irregulares e taxa de conformidade do dia, com o total do histórico abaixo de cada número. "Conforme" é quem foi liberado (catraca) ou estava com os EPIs (vigilância). |
 | **Eventos por hora** | Gráfico de barras do dia. Passar o mouse numa hora mostra os números. |
 | **Eventos de auditoria** | Os eventos mais recentes, com miniatura da foto, setor, EPIs exigidos e o que faltava, além de filtros e busca. Clicar numa linha abre a foto em tamanho grande. |
 
 O gerente **vê** qual setor está sendo fiscalizado, mas não consegue mudá-lo: a escolha do setor é feita só no aplicativo.
 
 A página funciona em celular e não depende de internet (não carrega nada de fora).
+
+### Catraca de demonstração (ESP32)
+
+A pasta `catraca_esp32/` tem o programa e o guia de montagem de uma maquete de catraca: um ESP32 com servo (a cancela), LEDs, buzzer, tela OLED e um relé. Ela abre a cancela quando o acesso é liberado e recebe o status de dois jeitos, que podem ficar ligados juntos:
+
+- **Cabo USB** (principal): o programa escreve o status na porta serial do ESP32. É só ligar o ESP32 no computador; o rodapé da janela mostra "Catraca: COM3 conectada". Precisa do `pyserial` (já está no `requirements.txt`).
+- **Wi-Fi** (opcional): o ESP32 lê o status em `/api/ao-vivo`, com o login do painel. Se o cabo sair, o Wi-Fi assume sozinho.
+
+Nos dois casos o ESP32 só **recebe**: o painel continua somente leitura. Com o cabo, a Arduino IDE não consegue gravar a placa enquanto o programa estiver aberto. Peças, ligações e passo a passo em [`catraca_esp32/LEIA-ME.md`](catraca_esp32/LEIA-ME.md).
 
 ### Só o histórico, sem abrir a catraca
 
@@ -327,6 +345,7 @@ Tech_day_26.2/
 ├── README.md
 ├── .github/workflows/      Testes automáticos no GitHub (Actions)
 ├── testes/                 Testes automatizados (python -m pytest)
+├── catraca_esp32/          Catraca de demonstração (ESP32): firmware e guia de montagem
 │
 ├── safetech/               Código do projeto
 │   ├── config.py           Todas as configurações (caminhos e ajustes)
@@ -334,7 +353,8 @@ Tech_day_26.2/
 │   ├── nucleo/             A "inteligência" (sem tela e sem câmera)
 │   │   ├── tipos.py            Estruturas de dados trocadas entre os módulos
 │   │   ├── epis.py             Quais EPIs o modelo instalado reconhece
-│   │   ├── detector.py         Escolhe o detector conforme o modo (rosto ou corpo)
+│   │   ├── modos.py            Textos de cada modo (catraca / vigilância)
+│   │   ├── detector.py         Escolhe o detector conforme o modo (catraca = rosto, vigilância = corpo)
 │   │   ├── detector_rosto.py   Encontra as pessoas pelo rosto (YuNet)
 │   │   ├── detector_corpo.py   Encontra as pessoas pelo corpo inteiro (YOLOX)
 │   │   ├── rastreador.py       Mantém a identidade de cada pessoa
@@ -347,6 +367,7 @@ Tech_day_26.2/
 │   │   ├── analisador.py       Linha de análise em thread própria
 │   │   ├── auditoria.py        Log em CSV e fotos de evidência
 │   │   ├── relatorio.py        Relatório HTML de um evento da auditoria
+│   │   ├── catraca_serial.py   Envia o status à catraca ESP32 pelo cabo USB
 │   │   ├── dataset.py          Salva imagens de treino com os rótulos
 │   │   ├── importacao.py       Abre imagens de arquivo ou da área de transferência
 │   │   └── preferencias.py     Lembra setor, EPIs, câmera e câmeras IP
@@ -470,8 +491,11 @@ O log fica em `auditoria/log_auditoria.csv`, e as fotos em `auditoria/imagens/`.
 | `exigidos` | EPIs obrigatórios naquele setor, ex.: `Capacete, Luvas` |
 | `faltando` | EPIs exigidos que a pessoa não estava usando (vazio se nenhum) |
 | `confiancas` | Confiança de cada EPI, ex.: `Capacete 97%, Luvas 12%` |
-| `liberado` | `SIM` ou `NAO` |
+| `liberado` | `SIM` ou `NAO`: a pessoa estava com todos os EPIs exigidos? (na catraca, liberado; na vigilância, conforme) |
 | `imagem` | Arquivo da foto de evidência |
+| `modo` | `catraca` ou `vigilancia`: diz como ler o resultado |
+
+Logs de versões anteriores, sem a coluna `modo`, são convertidos ao abrir o programa: os eventos ganham o modo `catraca` e o arquivo original fica guardado como `log_auditoria_formato_antigo_<data>.csv`.
 
 Cada evento tem uma foto do frame inteiro, com a pessoa em questão destacada.
 
@@ -538,10 +562,11 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `INTERVALO_RECONEXAO_IP_SEG` | `3.0` | Espera entre tentativas de reconectar à câmera IP |
 | `RTSP_POR_TCP` | `True` | Vídeo RTSP por TCP: um pouco mais de atraso, sem imagem cinza quando a rede perde pacotes |
 | `LARGURA_CAPTURA` / `ALTURA_CAPTURA` | `1280` / `720` | Resolução pedida à câmera. Alta para câmera geral, com várias pessoas pequenas na imagem |
-| `MODO_DETECCAO_PADRAO` | `"rosto"` | Modo de detecção na primeira vez que o programa abre |
+| `MODO_DETECCAO_PADRAO` | `"catraca"` | Modo de operação na primeira vez que o programa abre |
+| `TEXTOS_POR_MODO` | - | Os textos de cada modo: "Liberado"/"Negado", "Conforme"/"Não conforme", títulos da faixa e palavra no vídeo |
 | `LARGURAS_DETECCAO` | `(640, 320)` | Larguras das cópias usadas na detecção de rosto. A maior acha rostos pequenos, a menor acha rostos grandes e próximos |
 | `LARGURA_DETECCAO_CORPO` | `512` | Largura da cópia usada na detecção de corpo. Maior acha pessoas menores, mais lento |
-| `CONFIANCA_MINIMA_CORPO` | `0.5` | Confiança mínima para aceitar uma pessoa no modo corpo |
+| `CONFIANCA_MINIMA_CORPO` | `0.5` | Confiança mínima para aceitar uma pessoa no modo vigilância |
 | `TEMPO_MAXIMO_PREVISAO_SEG` | `1.0` | Por quanto tempo o rastreador prevê a posição de quem está andando. `0` desliga |
 | `MAXIMO_CANDIDATOS_ROSTO` | `5000` | Candidatos mantidos pelo detector. Valor baixo faz parte das pessoas não ser detectada |
 | `CONFIANCA_MINIMA_ROSTO` | `0.7` | Confiança mínima para aceitar um rosto |
@@ -591,7 +616,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Saída esperada: `63 passed` em menos de um minuto.
+Saída esperada: `103 passed` em menos de meio minuto.
 
 | Arquivo | O que testa |
 |---|---|
@@ -602,6 +627,9 @@ Saída esperada: `63 passed` em menos de um minuto.
 | `test_camera.py` | Câmera IP: conexão, queda e reconexão, endereço errado, senha escondida |
 | `test_analisador.py` | Linha de análise completa: decisão, uma foto por pessoa, troca de setor |
 | `test_painel_web.py` | Painel web: login, somente leitura, proteção das pastas |
+| `test_contrato_catraca.py` | O formato de `/api/ao-vivo` de que a catraca ESP32 depende (Wi-Fi) |
+| `test_catraca_serial.py` | Envio do status pelo cabo USB (porta falsa): formato da linha, reconexão, porta ocupada, e se o firmware entende tudo o que é enviado |
+| `test_modos.py` | Modos Catraca e Vigilância: textos de cada modo, conversão de nomes e logs antigos, e o modo chegando à tela, auditoria, relatório, painel web e catraca |
 | `test_janela.py` | Botões da janela: excluir linha, salvar relatório, adicionar e remover câmera IP |
 
 Os testes seguem três regras:
@@ -631,7 +659,7 @@ No GitHub, os testes rodam sozinhos a cada envio de código (arquivo `.github/wo
 | **Imagem da câmera IP cinza ou borrada** | Perda de pacotes na rede. Deixe `RTSP_POR_TCP = True` e, se possível, use cabo em vez de Wi-Fi. |
 | **Aviso "Detector de rosto não encontrado"** | Baixe o arquivo `.onnx` (veja [Instalação](#instalação)). Sem ele o programa funciona, mas trata a cena inteira como uma pessoa. |
 | **Vídeo lento** | Reduza `LARGURA_CAPTURA`/`ALTURA_CAPTURA` para 640 e 480 e aumente o intervalo de análise na tela. |
-| **Nem todas as pessoas são detectadas** | Se elas estão de costas, de lado ou se cruzando, mude para o modo **Corpo**. No modo rosto, o rosto precisa estar visível e não muito pequeno: acrescente uma escala maior em `LARGURAS_DETECCAO` (por exemplo, `(960, 640, 320)`) ou aproxime a câmera. |
+| **Nem todas as pessoas são detectadas** | Se elas estão de costas, de lado ou se cruzando, mude para o modo **Vigilância**. No modo catraca, o rosto precisa estar visível e não muito pequeno: acrescente uma escala maior em `LARGURAS_DETECCAO` (por exemplo, `(960, 640, 320)`) ou aproxime a câmera. |
 | **Fotos de evidência repetidas da mesma pessoa** | O detector está perdendo a pessoa por mais tempo do que a memória do rastreador. Aumente `TEMPO_MEMORIA_PESSOA_SEG`. |
 | **Duas pessoas diferentes contadas como uma** | O contrário: diminua `TEMPO_MEMORIA_PESSOA_SEG` ou `DISTANCIA_MAXIMA_RASTREIO`. |
 | **A caixa não aparece** | O detector precisa ver o rosto. Fique de frente para a câmera, com boa iluminação. |
@@ -647,8 +675,8 @@ No GitHub, os testes rodam sozinhos a cada envio de código (arquivo `.github/wo
 
 Limitações conhecidas:
 
-- **No modo rosto, a pessoa é localizada pelo rosto.** De costas ou com o rosto muito coberto, ela não é detectada; para isso existe o modo corpo.
-- **No modo corpo, quem está quase todo encoberto por outra pessoa pode não ser detectado**, e a análise é mais lenta.
+- **No modo catraca, a pessoa é localizada pelo rosto.** De costas ou com o rosto muito coberto, ela não é detectada; para isso existe o modo vigilância.
+- **No modo vigilância, quem está quase todo encoberto por outra pessoa pode não ser detectado**, e a análise é mais lenta.
 - **O modelo de EPI precisa de imagens dos dois modos** para funcionar bem em ambos, porque o recorte de cada um é diferente.
 - **O modelo por EPI que vem no repositório foi treinado com poucas imagens.** Ele serve para demonstração; para uso real, é preciso coletar um dataset maior e treinar de novo.
 - **O modelo olha o recorte inteiro da pessoa, reduzido para 224x224.** Itens pequenos, como óculos e luvas, são os mais difíceis e os que mais dependem de um dataset grande e variado.
@@ -662,5 +690,5 @@ Próximos passos possíveis:
 - Confirmação por voz da Ordem de Serviço (etapa futura do desafio).
 - Um detector de objetos (que localiza cada equipamento na imagem), mais preciso para itens pequenos como óculos e luvas.
 - Edição dos setores pela própria tela, sem mexer no `config.py`.
-- Integração com uma catraca real (acionamento por relé ou porta serial).
+- Integração com uma catraca real: a maquete ESP32 já aciona um relé, que é o mesmo sinal de contato seco usado por muitas catracas.
 - Relatórios da auditoria por período (dia, semana), além do relatório por evento que já existe.

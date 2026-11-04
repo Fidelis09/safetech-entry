@@ -10,6 +10,8 @@ desenhados aqui usam apenas caracteres simples.
 
 import cv2
 
+from safetech import config
+from safetech.nucleo import modos
 from safetech.nucleo.tipos import PessoaObservada, StatusPessoa
 
 
@@ -29,32 +31,37 @@ FONTE = cv2.FONT_HERSHEY_SIMPLEX
 # TEXTO DO RÓTULO
 # ============================================================
 
-# Uma única palavra por status. Com muitas pessoas na imagem, um
+# Uma única palavra por pessoa. Com muitas pessoas na imagem, um
 # rótulo comprido cobre o vizinho; o detalhe (quais EPIs faltam) fica
 # na faixa de status, no log de auditoria e no painel web.
-PALAVRA_STATUS = {
-    StatusPessoa.LIBERADO: "OK",
-    StatusPessoa.NEGADO: "NEGADO",
-    StatusPessoa.ANALISANDO: "...",
-}
+#
+# A palavra depende do modo (config.TEXTOS_POR_MODO): na catraca,
+# "OK" / "NEGADO"; na vigilância, "OK" / "SEM EPI".
+PALAVRA_ANALISANDO = "..."
 
 
-def texto_da_pessoa(pessoa: PessoaObservada) -> str:
-    """A palavra desenhada junto da caixa: "OK", "NEGADO" ou "..."."""
+def texto_da_pessoa(pessoa: PessoaObservada, modo=config.MODO_CATRACA) -> str:
+    """A palavra desenhada junto da caixa (ex.: "OK", "NEGADO", "SEM EPI" ou "...")."""
 
-    return PALAVRA_STATUS[pessoa.status]
+    if pessoa.status is StatusPessoa.ANALISANDO:
+        return PALAVRA_ANALISANDO
+
+    textos = modos.textos(modo)
+
+    return textos["palavra_ok"] if pessoa.status is StatusPessoa.LIBERADO else textos["palavra_irregular"]
 
 
 # ============================================================
 # DESENHO
 # ============================================================
 
-def desenhar_pessoas(imagem_bgr, pessoas, escala=1.0):
+def desenhar_pessoas(imagem_bgr, pessoas, escala=1.0, modo=config.MODO_CATRACA):
     """
     Desenha todas as pessoas sobre a imagem (a imagem é alterada).
 
     escala -> fator entre a imagem recebida e o frame original, usado
               quando a imagem foi redimensionada para caber na tela.
+    modo   -> modo de operação; define a palavra junto da caixa.
     """
 
     for pessoa in pessoas:
@@ -64,7 +71,7 @@ def desenhar_pessoas(imagem_bgr, pessoas, escala=1.0):
         desenhar_caixa(
             imagem_bgr,
             caixa,
-            texto_da_pessoa(pessoa),
+            texto_da_pessoa(pessoa, modo),
             CORES_STATUS[pessoa.status],
         )
 

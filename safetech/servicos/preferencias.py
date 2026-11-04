@@ -45,8 +45,12 @@ def carregar(arquivo=config.ARQUIVO_PREFERENCIAS):
         setor = setor_salvo
         exigidos = [chave for chave in exigidos_salvos if chave in config.EPIS]
 
-    if dados.get("modo_deteccao") in config.MODOS_DETECCAO:
-        modo_deteccao = dados["modo_deteccao"]
+    # Versões anteriores salvavam "rosto" ou "corpo": viram "catraca"
+    # e "vigilancia", que usam esses mesmos detectores
+    modo_salvo = config.MODOS_ANTIGOS.get(dados.get("modo_deteccao"), dados.get("modo_deteccao"))
+
+    if modo_salvo in config.MODOS_DETECCAO:
+        modo_deteccao = modo_salvo
 
     return setor, exigidos, modo_deteccao
 

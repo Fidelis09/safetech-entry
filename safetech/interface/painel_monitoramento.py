@@ -68,7 +68,7 @@ class PainelMonitoramento(ttk.Frame):
         self._modos_disponiveis = set(modos_disponiveis)
         self._ao_mudar_modo = ao_mudar_modo
 
-        # Modo de detecção selecionado (rosto ou corpo)
+        # Modo de operação selecionado (catraca ou vigilância)
         self._modo = tk.StringVar(value=modo_inicial)
 
         self._ao_salvar_imagem = ao_salvar_imagem
@@ -261,7 +261,7 @@ class PainelMonitoramento(ttk.Frame):
         self._caixa_setor.bind("<<ComboboxSelected>>", self._ao_escolher_setor)
 
         # --------------------------------------------------
-        # SELETOR DO MODO DE DETECÇÃO (rosto / corpo)
+        # SELETOR DO MODO DE OPERAÇÃO (catraca / vigilância)
         # --------------------------------------------------
         #
         # Botões lado a lado em que só um fica marcado. Montados da
@@ -285,7 +285,7 @@ class PainelMonitoramento(ttk.Frame):
             if modo not in self._modos_disponiveis:
                 botao.state(["disabled"])
 
-        ttk.Label(linha, text="Detectar por", style="Suave.Cartao.TLabel").pack(side="right", padx=(0, 6))
+        ttk.Label(linha, text="Modo", style="Suave.Cartao.TLabel").pack(side="right", padx=(0, 6))
 
         # Os EPIs ficam numa segunda linha, para caberem mesmo com a
         # janela estreita (ou com mais equipamentos cadastrados)

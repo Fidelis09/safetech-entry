@@ -1,5 +1,5 @@
 """
-Detector de pessoas pelo ROSTO (modo "rosto").
+Detector de pessoas pelo ROSTO (usado no modo "catraca").
 
 O modelo de EPI só sabe dizer quais equipamentos aparecem numa imagem;
 ele não sabe ONDE estão as pessoas. Quem resolve isso é este módulo:

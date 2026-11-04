@@ -323,17 +323,17 @@
         <div class="rodape" id="geral-total"></div>
       </div>
       <div class="indicador">
-        <div class="titulo">Taxa de liberação</div>
+        <div class="titulo">Taxa de conformidade</div>
         <div class="valor" id="hoje-taxa">-</div>
         <div class="rodape" id="geral-taxa"></div>
       </div>
       <div class="indicador">
-        <div class="titulo">Liberados</div>
+        <div class="titulo">Conformes</div>
         <div class="valor" id="hoje-liberados">0</div>
         <div class="rodape" id="geral-liberados"></div>
       </div>
       <div class="indicador">
-        <div class="titulo">Negados</div>
+        <div class="titulo">Irregulares</div>
         <div class="valor" id="hoje-negados">0</div>
         <div class="rodape" id="geral-negados"></div>
       </div>
@@ -341,8 +341,8 @@
 
     <div class="legenda">
       <strong style="color: var(--texto)">Eventos por hora</strong>
-      <span><svg><rect width="12" height="12" fill="var(--sucesso)"/></svg>Liberados</span>
-      <span><svg><rect width="12" height="12" fill="var(--perigo)"/><path d="M-2 6 6 -2M2 14 14 2M6 14 14 6" stroke="#fff" stroke-opacity=".55"/></svg>Negados</span>
+      <span><svg><rect width="12" height="12" fill="var(--sucesso)"/></svg>Conformes</span>
+      <span><svg><rect width="12" height="12" fill="var(--perigo)"/><path d="M-2 6 6 -2M2 14 14 2M6 14 14 6" stroke="#fff" stroke-opacity=".55"/></svg>Irregulares</span>
     </div>
 
     <div class="grafico" id="grafico">
@@ -356,8 +356,8 @@
 
     <div class="filtros">
       <button type="button" data-filtro="todos" aria-pressed="true">Todos</button>
-      <button type="button" data-filtro="SIM" aria-pressed="false">Liberados</button>
-      <button type="button" data-filtro="NAO" aria-pressed="false">Negados</button>
+      <button type="button" data-filtro="SIM" aria-pressed="false">Conformes</button>
+      <button type="button" data-filtro="NAO" aria-pressed="false">Irregulares</button>
       <input type="search" id="busca" placeholder="Buscar por data, pessoa, setor, EPI..." aria-label="Buscar eventos">
     </div>
 
@@ -371,7 +371,8 @@
             <th>Setor</th>
             <th>Exigidos</th>
             <th>Faltando</th>
-            <th>Acesso</th>
+            <th>Modo</th>
+            <th>Resultado</th>
           </tr>
         </thead>
         <tbody id="corpo-tabela"></tbody>
@@ -432,13 +433,6 @@ function marcarConexao(ok) {
 // AO VIVO
 // ============================================================
 
-const TEXTOS_ACESSO = {
-  liberado: "ACESSO LIBERADO",
-  negado: "ACESSO NEGADO",
-  analisando: "ANALISANDO",
-  sem_pessoas: "AGUARDANDO",
-};
-
 async function atualizarAoVivo() {
   try {
     const resposta = await fetch("/api/ao-vivo", { cache: "no-store" });
@@ -465,8 +459,9 @@ function desenharAoVivo(dados) {
 
   // Setor em fiscalização e o que ele exige. Só informativo: a
   // escolha do setor é feita pelo operador, no aplicativo.
+  // O modo (catraca ou vigilância) também é só informativo
   el("setor-atual").textContent = dados.setor
-    ? "Setor: " + dados.setor + " · exige " + (dados.exigidos.join(", ") || "nenhum EPI")
+    ? "Modo: " + dados.nome_modo + " · Setor: " + dados.setor + " · exige " + (dados.exigidos.join(", ") || "nenhum EPI")
     : "";
 
   if (!dados.camera_ativa) {
@@ -491,10 +486,11 @@ function desenharAoVivo(dados) {
   const negadas = dados.pessoas.filter((p) => p.status === "negado").length;
 
   faixa.className = "faixa " + (dados.acesso === "sem_pessoas" ? "" : dados.acesso);
-  el("titulo-status").textContent = TEXTOS_ACESSO[dados.acesso] || dados.acesso;
+  // O título já vem no texto do modo ("ACESSO LIBERADO" ou "EM CONFORMIDADE")
+  el("titulo-status").textContent = dados.titulo || dados.acesso;
   el("detalhe-status").textContent = total === 0
-    ? "Nenhuma pessoa na frente da câmera."
-    : total + (total === 1 ? " pessoa" : " pessoas") + " na imagem: "
+    ? "Nenhuma pessoa " + dados.lugar + "."
+    : total + (total === 1 ? " pessoa " : " pessoas ") + dados.lugar + ": "
       + liberadas + " em conformidade, " + negadas + " com EPI faltando.";
 
   // Um marcador por pessoa, dizendo O QUE falta (não só que falta)
@@ -602,7 +598,7 @@ function desenharGrafico(porHora) {
   const topo = degrau * Math.ceil(maior / degrau);
   const y = (valor) => margem.topo + alturaUtil * (1 - valor / topo);
 
-  const desenho = svg("svg", { viewBox: `0 0 ${L} ${A}`, role: "img", "aria-label": "Eventos por hora de hoje, liberados e negados" });
+  const desenho = svg("svg", { viewBox: `0 0 ${L} ${A}`, role: "img", "aria-label": "Eventos por hora de hoje, conformes e irregulares" });
 
   // Padrão de hachura dos negados
   const definicoes = svg("defs", {});
@@ -656,7 +652,7 @@ function desenharGrafico(porHora) {
     const alvo = svg("rect", { class: "alvo", x: centro - passo / 2, y: margem.topo, width: passo, height: alturaUtil });
 
     alvo.addEventListener("pointerenter", () => {
-      dica.textContent = `${indice}h às ${indice + 1}h: ${hora.liberados} liberado(s), ${hora.negados} negado(s)`;
+      dica.textContent = `${indice}h às ${indice + 1}h: ${hora.liberados} conforme(s), ${hora.negados} irregular(es)`;
       dica.style.display = "block";
       // Posição em porcentagem, para acompanhar o tamanho real do SVG
       dica.style.left = Math.min(85, Math.max(15, centro / L * 100)) + "%";
@@ -703,7 +699,8 @@ function desenharTabela() {
     }
 
     const celulaAcesso = criar("td");
-    celulaAcesso.append(criar("span", liberado ? "Liberado" : "Negado", "marcador " + (liberado ? "liberado" : "negado")));
+    // "Liberado"/"Negado" (catraca) ou "Conforme"/"Não conforme" (vigilância)
+    celulaAcesso.append(criar("span", evento.resultado, "marcador " + (liberado ? "liberado" : "negado")));
 
     linha.append(
       celulaFoto,
@@ -712,6 +709,7 @@ function desenharTabela() {
       criar("td", evento.setor),
       criar("td", evento.exigidos || "-"),
       criar("td", evento.faltando || "-"),
+      criar("td", evento.nome_modo),
       celulaAcesso,
     );
 
@@ -733,8 +731,9 @@ function abrirFoto(evento) {
   el("foto-grande").src = "/imagens/" + encodeURIComponent(evento.imagem);
 
   el("detalhes-foto").replaceChildren(
-    criar("span", liberado ? "Liberado" : "Negado", "marcador " + (liberado ? "liberado" : "negado")),
+    criar("span", evento.resultado, "marcador " + (liberado ? "liberado" : "negado")),
     criar("strong", evento.timestamp),
+    criar("span", "Modo: " + evento.nome_modo),
     criar("span", "Pessoa " + evento.pessoa),
     criar("span", "Setor: " + evento.setor),
     criar("span", evento.faltando ? "Faltando: " + evento.faltando : "Nada faltando"),

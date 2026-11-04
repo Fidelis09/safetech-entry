@@ -34,13 +34,17 @@ python -m pytest       # testes automatizados (pasta testes/, ~35 s)
 ## Arquitetura (resumo)
 
 - `safetech/config.py` — toda a configuração.
-- `safetech/nucleo/` — sem câmera e sem tela: detectores (`detector.py` escolhe entre `detector_rosto.py` e `detector_corpo.py`), `rastreador.py`, `classificador.py`, `decisao.py`, `anotacao.py`, `tipos.py`, `epis.py`.
-- `safetech/servicos/` — `camera.py` (thread; webcam por número ou câmera IP por endereço), `analisador.py` (thread: detectar → rastrear → classificar → decidir → auditar), `auditoria.py`, `dataset.py`, `importacao.py`, `preferencias.py`, `relatorio.py` (relatório HTML de uma linha da auditoria).
+- `safetech/nucleo/` — sem câmera e sem tela: detectores (`detector.py` escolhe entre `detector_rosto.py` e `detector_corpo.py`), `rastreador.py`, `classificador.py`, `decisao.py`, `anotacao.py`, `tipos.py`, `epis.py`, `modos.py` (textos de cada modo).
+- `safetech/servicos/` — `camera.py` (thread; webcam por número ou câmera IP por endereço), `analisador.py` (thread: detectar → rastrear → classificar → decidir → auditar), `auditoria.py`, `dataset.py`, `importacao.py`, `preferencias.py`, `relatorio.py` (relatório HTML de uma linha da auditoria), `catraca_serial.py` (thread que envia o status ao ESP32 pelo cabo USB).
 - `safetech/interface/` — Tkinter. Os painéis só exibem e chamam funções da `janela_principal.py`; não conhecem câmera nem modelo.
 - `safetech/web/` — painel do gerente.
+- `catraca_esp32/` — firmware Arduino (C++) da catraca de demonstração. Recebe o status por dois caminhos: cabo USB (linhas `ST|acesso|negadas|total|faltando`, enviadas por `servicos/catraca_serial.py`) e Wi-Fi (lê `/api/ao-vivo`, só GET). O cabo tem prioridade. Ajustes ficam em `config.h` (fora do git; modelo em `config_exemplo.h`). Se mudar o formato da linha ou do `/api/ao-vivo`, atualizar o `.ino` e os testes `test_catraca_serial.py` / `test_contrato_catraca.py`.
+- Compilar o firmware: a Arduino IDE traz o `arduino-cli` em `C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe` (placa `esp32:esp32`, FQBN `esp32:esp32:esp32`; a pasta do sketch é `catraca_esp32/` e compila com `.`). Gravar: `compile --upload -p COM3`. Com o SafeTech aberto a COM3 fica ocupada: fechar o app (ou `CATRACA_SERIAL_ATIVA = False`) antes de gravar.
 - Dependências entre camadas têm direção única: interface → serviços → núcleo.
 
 ## Regras do projeto (não quebrar)
+
+- **Dois modos de operação** (`config.MODO_CATRACA` = detector de rosto, `config.MODO_VIGILANCIA` = detector de corpo). A decisão é a mesma; muda o texto ("Liberado/Negado" x "Conforme/Não conforme") e a catraca física só obedece no modo catraca. Textos só em `config.TEXTOS_POR_MODO`, lidos por `nucleo/modos.py`: nunca escrever "Liberado"/"Negado" fixo. O modo vai no `EstadoCena.modo` e na coluna `modo` da auditoria. Nomes antigos `"rosto"`/`"corpo"` são convertidos (`config.MODOS_ANTIGOS`).
 
 - **Detectar separado de exigir**: o classificador avalia todos os EPIs; o setor só define quais contam. Não misturar regra de setor no classificador.
 - **Nomes e ordem dos EPIs vêm de `modelos/epis.json`**, nunca fixos no código de inferência.
@@ -54,6 +58,7 @@ python -m pytest       # testes automatizados (pasta testes/, ~35 s)
 - Testes em `testes/` (pytest, configurado em `pytest.ini`). Rodar `python -m pytest` depois de qualquer mudança e manter todos passando; funcionalidade nova ganha teste novo.
 - `testes/conftest.py` já redireciona os caminhos abaixo e oferece as fixtures `auditoria`, `raiz` (janela escondida) e `sem_ia`; `testes/falsos.py` tem câmera, detector, classificador e câmera IP falsos. Reaproveitar em vez de recriar.
 - Os testes não podem depender do TensorFlow (o GitHub Actions não o instala).
+- Os testes **nunca abrem a porta USB real** do ESP32: o `conftest.py` põe `CATRACA_SERIAL_ATIVA = False` e os testes do envio usam uma porta falsa.
 - Testes devem gravar só em **pastas temporárias**: alterar `config.PASTA_AUDITORIA`, `config.ARQUIVO_LOG_AUDITORIA`, `config.PASTA_IMAGENS_AUDITORIA`, `config.PASTA_IMAGENS_DATASET`, `config.ARQUIVO_ROTULOS`, `config.ARQUIVO_PREFERENCIAS`, `config.PASTA_EXCLUIDOS` e `config.PASTA_RELATORIOS` **antes** de importar os serviços (os padrões são lidos na importação).
 - Para o painel web em teste: `config.PAINEL_WEB_HOST = "127.0.0.1"` e outra porta, para não acionar o firewall do Windows nem colidir com o app aberto.
 - Câmera IP em teste: servir um MJPEG falso em `127.0.0.1` (`multipart/x-mixed-replace`) e abrir `http://127.0.0.1:<porta>/...`.

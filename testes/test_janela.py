@@ -13,6 +13,7 @@ from tkinter import messagebox
 import numpy as np
 import pytest
 
+from safetech import config
 from safetech.interface import janela_principal
 from safetech.interface.painel_monitoramento import TEXTO_ADICIONAR_IP
 from safetech.nucleo.tipos import ResultadoEPI
@@ -113,6 +114,58 @@ def test_salvar_relatorio_da_linha_abre_no_navegador(janela):
 
     assert len(janela.abertos_no_navegador) == 1
     assert janela.abertos_no_navegador[0].endswith("relatorio.html")
+
+
+# ============================================================
+# CATRACA ESP32 (cabo USB)
+# ============================================================
+
+class CatracaFalsa:
+    """No lugar do CatraciaSerial de verdade: não abre nenhuma porta."""
+
+    def __init__(self, fonte_ao_vivo):
+
+        self.situacao = "Catraca: COM3 conectada"
+        self.iniciada = False
+        self.parada = False
+
+    def iniciar(self):
+        self.iniciada = True
+
+    def parar(self):
+        self.parada = True
+
+
+def test_catraca_aparece_na_barra_de_status_e_para_ao_fechar(raiz, sem_ia, monkeypatch):
+
+    monkeypatch.setattr(config, "CATRACA_SERIAL_ATIVA", True)
+    monkeypatch.setattr(janela_principal, "CatracaSerial", CatracaFalsa)
+
+    tela = janela_principal.JanelaPrincipal(raiz, 1.0, camera=CameraParada())
+
+    raiz.update()
+
+    catraca = tela._catraca
+
+    assert catraca.iniciada
+    assert tela._rotulo_catraca.cget("text") == "Catraca: COM3 conectada"
+
+    # O texto acompanha o que a catraca informa
+    catraca.situacao = "Catraca: cabo desconectado, procurando..."
+
+    tela._atualizar_catraca()
+
+    assert tela._rotulo_catraca.cget("text") == "Catraca: cabo desconectado, procurando..."
+
+    tela._ao_fechar()
+
+    assert catraca.parada
+
+
+def test_sem_catraca_ligada_nada_e_criado(janela):
+
+    # No conftest, CATRACA_SERIAL_ATIVA é False
+    assert janela._catraca is None
 
 
 # ============================================================
