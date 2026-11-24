@@ -5,7 +5,7 @@ Para abrir o programa:
 
     python app.py
 
-Este arquivo só inicia a janela. O código está organizado no pacote
+Este arquivo só inicia a janela. O código está organizadco no pacote
 "safetech" (veja o README.md para o mapa completo do projeto).
 """
 

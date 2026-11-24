@@ -107,6 +107,9 @@ class EstadoCena:
     # não conforme) e se a catraca física obedece.
     modo: str = ""
 
+    # Nome da área (câmera) de onde veio este retrato
+    area: str = ""
+
 
 # ============================================================
 # UMA LINHA DO LOG DE AUDITORIA
@@ -149,6 +152,9 @@ class RegistroAuditoria:
     # o resultado é lido como liberado/negado ou conforme/não conforme.
     modo: str
 
+    # Nome da área (câmera) onde o evento aconteceu, ex.: "Portaria"
+    area: str
+
     def como_linha(self):
         """Valores na mesma ordem das colunas do CSV."""
 
@@ -163,4 +169,5 @@ class RegistroAuditoria:
             self.liberado,
             self.imagem,
             self.modo,
+            self.area,
         ]

@@ -19,6 +19,9 @@ negado, mas por quê.
 E guarda o MODO de operação ("catraca" ou "vigilancia"): na catraca o
 resultado é lido como liberado/negado; na vigilância, como conforme/
 não conforme. A coluna "liberado" (SIM/NAO) vale para os dois.
+
+E a ÁREA (câmera) onde o evento aconteceu: com várias câmeras, a
+auditoria continua uma só, e cada linha diz de onde veio.
 """
 
 import csv
@@ -44,12 +47,22 @@ COLUNAS = [
     "liberado",
     "imagem",
     "modo",
+    "area",
 ]
 
-# Colunas da versão anterior (sem "modo"). Um log nesse formato é
-# convertido para o atual: os eventos ganham o modo "catraca", que era
-# o único sentido (liberado/negado) que existia.
-COLUNAS_SEM_MODO = COLUNAS[:-1]
+# Colunas de versões anteriores. Um log nesses formatos é CONVERTIDO
+# para o atual, preenchendo as colunas que faltam com os valores
+# abaixo (o arquivo original fica guardado, intacto):
+#
+#   sem "modo" e "area" -> modo "catraca" (o único sentido que existia)
+#   sem "area"          -> área "Principal" (havia uma câmera só)
+COLUNAS_SEM_MODO = COLUNAS[:-2]
+COLUNAS_SEM_AREA = COLUNAS[:-1]
+
+VALORES_PARA_COLUNAS_NOVAS = {
+    "modo": config.MODO_CATRACA,
+    "area": config.NOME_AREA_PADRAO,
+}
 
 # Log das linhas excluídas: as mesmas colunas e a data da exclusão
 COLUNAS_EXCLUIDOS = COLUNAS + ["excluido_em"]
@@ -102,11 +115,11 @@ class ServicoAuditoria:
 
             cabecalho = _ler_cabecalho(self._arquivo_log)
 
-            if cabecalho == COLUNAS_SEM_MODO:
+            if cabecalho in (COLUNAS_SEM_MODO, COLUNAS_SEM_AREA):
 
                 antigo = _renomear_formato_antigo(self._arquivo_log)
 
-                self._copiar_sem_modo(antigo)
+                self._copiar_formato_anterior(antigo, cabecalho)
 
             elif cabecalho != COLUNAS:
 
@@ -124,8 +137,14 @@ class ServicoAuditoria:
             with open(self._arquivo_log, "w", newline="", encoding="utf-8") as arquivo:
                 csv.writer(arquivo).writerow(COLUNAS)
 
-    def _copiar_sem_modo(self, antigo):
-        """Cria o log atual com os eventos de um log sem a coluna "modo"."""
+    def _copiar_formato_anterior(self, antigo, cabecalho):
+        """
+        Cria o log atual com os eventos de um log de versão anterior,
+        que tinha só as primeiras colunas de COLUNAS. As que faltam
+        recebem os valores de VALORES_PARA_COLUNAS_NOVAS.
+        """
+
+        complemento = [VALORES_PARA_COLUNAS_NOVAS[coluna] for coluna in COLUNAS[len(cabecalho):]]
 
         with open(antigo, "r", newline="", encoding="utf-8", errors="replace") as origem:
 
@@ -134,9 +153,9 @@ class ServicoAuditoria:
             next(leitor, None)  # cabeçalho antigo
 
             linhas = [
-                linha + [config.MODO_CATRACA]
+                linha + complemento
                 for linha in leitor
-                if len(linha) == len(COLUNAS_SEM_MODO)
+                if len(linha) == len(cabecalho)
             ]
 
         with open(self._arquivo_log, "w", newline="", encoding="utf-8") as destino:
@@ -161,6 +180,7 @@ class ServicoAuditoria:
         liberado,
         imagem_bgr=None,
         modo=config.MODO_CATRACA,
+        area=config.NOME_AREA_PADRAO,
     ) -> RegistroAuditoria:
         """
         Grava um evento no CSV (e a foto de evidência, se houver).
@@ -170,6 +190,7 @@ class ServicoAuditoria:
         liberado            -> True se a pessoa estava com tudo o que o
                                setor exige
         modo                -> "catraca" ou "vigilancia"
+        area                -> nome da área (câmera) do evento
         """
 
         agora = datetime.now()
@@ -198,6 +219,7 @@ class ServicoAuditoria:
             liberado="SIM" if liberado else "NAO",
             imagem=nome_imagem,
             modo=modos.modo_valido(modo),
+            area=area or config.NOME_AREA_PADRAO,
         )
 
         # A foto e a linha do CSV são gravadas juntas, dentro da trava:
@@ -388,6 +410,57 @@ class ServicoAuditoria:
                         registros.append(RegistroAuditoria(*linha))
 
         return registros
+
+
+# ============================================================
+# EXPORTAÇÃO (planilha para o Excel)
+# ============================================================
+#
+# O log interno usa chaves curtas ("SIM"/"NAO", "vigilancia") e vírgula
+# como separador. A exportação é para PESSOAS: cabeçalhos por extenso,
+# resultado no texto do modo ("Liberado", "Não conforme") e o formato
+# que o Excel em português abre direto (veja SEPARADOR_CSV_EXPORTACAO).
+# O log original nunca é alterado: só se gera uma cópia legível.
+# ============================================================
+
+# (título da coluna, como obter o valor do registro)
+COLUNAS_EXPORTACAO = [
+    ("Data e hora", lambda r: r.timestamp),
+    ("Área", lambda r: r.area),
+    ("Modo", lambda r: modos.nome_do_modo(r.modo)),
+    ("Evento", lambda r: "Entrada" if r.evento == EVENTO_ENTRADA else "Mudança"),
+    ("Pessoa", lambda r: r.pessoa),
+    ("Setor", lambda r: r.setor),
+    ("EPIs exigidos", lambda r: r.exigidos),
+    ("Faltando", lambda r: r.faltando),
+    ("Resultado", lambda r: modos.resultado(r.modo, r.liberado == "SIM")),
+    ("Confiança", lambda r: r.confiancas),
+    ("Foto", lambda r: r.imagem),
+]
+
+
+def gerar_csv_exportacao(registros) -> str:
+    """Texto da planilha de exportação (cabeçalho + uma linha por registro)."""
+
+    import io
+
+    saida = io.StringIO()
+
+    escritor = csv.writer(saida, delimiter=config.SEPARADOR_CSV_EXPORTACAO, lineterminator="\r\n")
+
+    escritor.writerow([titulo for titulo, _ in COLUNAS_EXPORTACAO])
+
+    for registro in registros:
+        escritor.writerow([valor(registro) for _, valor in COLUNAS_EXPORTACAO])
+
+    return saida.getvalue()
+
+
+def exportar_csv(registros, caminho):
+    """Grava a planilha de exportação em 'caminho'. Pode lançar OSError (ex.: arquivo aberto no Excel)."""
+
+    with open(caminho, "w", newline="", encoding=config.CODIFICACAO_CSV_EXPORTACAO) as arquivo:
+        arquivo.write(gerar_csv_exportacao(registros))
 
 
 # ============================================================

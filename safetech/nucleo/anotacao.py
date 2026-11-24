@@ -101,7 +101,7 @@ def desenhar_caixa(imagem_bgr, caixa, texto, cor):
     # RÓTULO: fundo colorido + palavra em branco
     # ------------------------------------------------------
 
-    tamanho_fonte = 0.4 * max(1.0, largura_imagem / 800)
+    tamanho_fonte = config.ESCALA_FONTE_ROTULO * max(1.0, largura_imagem / 800)
     espessura_fonte = base
 
     (largura_texto, altura_texto), _ = cv2.getTextSize(
@@ -137,3 +137,67 @@ def desenhar_caixa(imagem_bgr, caixa, texto, cor):
         espessura_fonte,
         cv2.LINE_AA,
     )
+
+
+# ============================================================
+# CARIMBO DAS FOTOS DE EVIDÊNCIA
+# ============================================================
+#
+# Uma faixa escura embaixo da foto com o texto do evento (data e hora,
+# área, pessoa, resultado). Fica gravado nos pixels: a foto continua
+# se explicando mesmo copiada para fora do sistema, sem o CSV junto.
+# ============================================================
+
+COR_FAIXA_CARIMBO = (20, 15, 11)
+
+# Opacidade da faixa (0 = invisível, 1 = cobre a foto por completo)
+OPACIDADE_CARIMBO = 0.72
+
+
+def carimbar(imagem_bgr, texto):
+    """
+    Escreve o texto numa faixa no rodapé da imagem (a imagem é alterada).
+
+    Só caracteres simples (sem acentos): a fonte do OpenCV não os tem.
+    """
+
+    altura_imagem, largura_imagem = imagem_bgr.shape[:2]
+
+    base = max(1, round(largura_imagem / 1000))
+    tamanho_fonte = config.ESCALA_FONTE_ROTULO * max(1.0, largura_imagem / 800)
+
+    (_, altura_texto), _ = cv2.getTextSize(texto, FONTE, tamanho_fonte, base)
+
+    margem = 6 * base
+    altura_faixa = min(altura_imagem, altura_texto + 2 * margem)
+    topo = altura_imagem - altura_faixa
+
+    # Faixa semitransparente: mistura a cor da faixa com a foto embaixo
+    trecho = imagem_bgr[topo:, :]
+    faixa = trecho.copy()
+    faixa[:] = COR_FAIXA_CARIMBO
+
+    cv2.addWeighted(faixa, OPACIDADE_CARIMBO, trecho, 1 - OPACIDADE_CARIMBO, 0, dst=trecho)
+
+    cv2.putText(
+        imagem_bgr,
+        texto,
+        (margem, altura_imagem - margem),
+        FONTE,
+        tamanho_fonte,
+        COR_TEXTO,
+        base,
+        cv2.LINE_AA,
+    )
+
+    return imagem_bgr
+
+
+def sem_acentos(texto) -> str:
+    """ "Área Laboratório" -> "Area Laboratorio" (para desenhar com a fonte do OpenCV)."""
+
+    import unicodedata
+
+    decomposto = unicodedata.normalize("NFKD", texto)
+
+    return "".join(letra for letra in decomposto if not unicodedata.combining(letra))

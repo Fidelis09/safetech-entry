@@ -12,7 +12,9 @@
   Ela apenas CONSULTA o servidor do aplicativo:
 
       /api/ao-vivo    a cada 1 s   -> status da catraca e imagem da câmera
+      /api/areas      a cada 2 s   -> situação de cada área (com 2 ou mais)
       /api/historico  a cada 4 s   -> indicadores, gráfico e tabela de eventos
+      /exportar.csv   ao clicar    -> baixa o histórico numa planilha
 
   Não existe nenhum botão ou chamada que altere o sistema.
 -->
@@ -34,8 +36,58 @@
     --perigo: #dc2626;
     --perigo-claro: #f87171;
     --alerta: #d97706;
-    --neutro: #334155;
+    --neutro: #475569;
+    --cartao-hover: #28313c;
+    --linha-impar: #232b35;
+    --dica: #0b0e12;
+    --realce-sutil: rgba(255, 255, 255, .06);
     --raio: 10px;
+    color-scheme: dark;
+  }
+
+  /* ============================================================
+     TEMA CLARO
+     ============================================================
+     Mesmas variáveis, outras cores. Vale quando o gerente escolhe
+     "Tema claro" no botão do cabeçalho (data-tema="claro") ou, sem
+     escolha guardada, quando o sistema do aparelho está no modo claro.
+     As cores de status (verde, vermelho, laranja) não mudam. */
+  :root[data-tema="claro"] {
+    --fundo: #eef1f5;
+    --painel: #f8f9fb;
+    --cartao: #ffffff;
+    --borda: #d5dbe3;
+    --texto: #111827;
+    --texto-suave: #5b6676;
+    --destaque: #2563eb;
+    --sucesso-claro: #15803d;
+    --perigo-claro: #c0262d;
+    --neutro: #64748b;
+    --cartao-hover: #eef2f7;
+    --linha-impar: #f4f6f9;
+    --dica: #ffffff;
+    --realce-sutil: rgba(0, 0, 0, .05);
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-tema]) {
+      --fundo: #eef1f5;
+      --painel: #f8f9fb;
+      --cartao: #ffffff;
+      --borda: #d5dbe3;
+      --texto: #111827;
+      --texto-suave: #5b6676;
+      --destaque: #2563eb;
+      --sucesso-claro: #15803d;
+      --perigo-claro: #c0262d;
+      --neutro: #64748b;
+      --cartao-hover: #eef2f7;
+      --linha-impar: #f4f6f9;
+      --dica: #ffffff;
+      --realce-sutil: rgba(0, 0, 0, .05);
+      color-scheme: light;
+    }
   }
 
   * { box-sizing: border-box; }
@@ -45,7 +97,22 @@
     background: var(--fundo);
     color: var(--texto);
     font: 14px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    transition: background-color .2s, color .2s;
   }
+
+  /* Botão de tema no cabeçalho */
+  .botao-tema {
+    background: var(--cartao);
+    color: var(--texto);
+    border: 1px solid var(--borda);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .botao-tema:hover { background: var(--cartao-hover); }
 
   /* ============================================================
      CABEÇALHO
@@ -61,7 +128,13 @@
 
   header h1 { margin: 0; font-size: 19px; }
 
+  header .marca { display: flex; align-items: center; gap: 10px; }
+
+  header .marca svg { width: 30px; height: 30px; flex: none; }
+
   header .subtitulo { color: var(--texto-suave); }
+
+  .relogio { font-weight: 700; font-variant-numeric: tabular-nums; }
 
   .etiqueta {
     padding: 3px 10px;
@@ -136,9 +209,75 @@
 
   .faixa strong { display: block; font-size: 20px; letter-spacing: .3px; }
 
+  /* Símbolo antes do título: repete a cor para quem não distingue cores */
+  .faixa strong::before { content: "● "; }
+  .faixa.liberado strong::before { content: "✔ "; }
+  .faixa.negado strong::before { content: "✖ "; }
+  .faixa.analisando strong::before { content: "◔ "; }
+
   .faixa.liberado { background: var(--sucesso); }
   .faixa.negado { background: var(--perigo); }
   .faixa.analisando { background: var(--alerta); }
+
+  /* Legenda "AO VIVO" sobre a imagem, como num monitor de segurança */
+  .video .ao-vivo {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    background: rgba(11, 15, 20, .8);
+    color: #f1f5f9;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .video .ao-vivo::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--perigo-claro);
+    animation: piscar 2s steps(1) infinite;
+  }
+
+  @keyframes piscar { 50% { opacity: 0; } }
+
+  /* ============================================================
+     ÁREAS (visão geral, só com duas câmeras ou mais)
+     ============================================================ */
+  .areas { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+
+  .area {
+    background: var(--cartao);
+    border: 1px solid var(--borda);
+    border-top: 3px solid var(--neutro);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .area.liberado { border-top-color: var(--sucesso); }
+  .area.negado { border-top-color: var(--perigo); }
+  .area.analisando { border-top-color: var(--alerta); }
+
+  .area img, .area .sem-video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+    display: block;
+    background: #000;
+  }
+
+  .area .sem-video { display: grid; place-items: center; color: var(--texto-suave); font-size: 12px; }
+
+  .area .info { padding: 8px 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; }
+
+  .area .info .nome { font-weight: 700; }
+
+  .area .info .apoio { color: var(--texto-suave); font-size: 12px; width: 100%; }
 
   .pessoas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
@@ -164,7 +303,14 @@
      ============================================================ */
   .indicadores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 
-  .indicador { background: var(--cartao); border-radius: 8px; padding: 12px 14px; }
+  /* Filete colorido no topo de cada cartão, na cor do indicador */
+  .indicador { background: var(--cartao); border-radius: 8px; padding: 10px 14px 12px; border-top: 3px solid var(--destaque); }
+
+  .indicador.conforme { border-top-color: var(--sucesso); }
+  .indicador.conforme .valor { color: var(--sucesso-claro); }
+  .indicador.irregular { border-top-color: var(--perigo); }
+  .indicador.irregular .valor { color: var(--perigo-claro); }
+  .indicador.neutro { border-top-color: var(--texto-suave); }
 
   .indicador .titulo { color: var(--texto-suave); font-size: 12px; }
   .indicador .valor { font-size: 30px; font-weight: 700; line-height: 1.2; }
@@ -188,12 +334,12 @@
   .grafico .grade { stroke: var(--borda); stroke-width: 1; }
 
   .grafico .alvo { fill: transparent; }
-  .grafico .alvo:hover { fill: rgba(255, 255, 255, .06); }
+  .grafico .alvo:hover { fill: var(--realce-sutil); }
 
   .dica {
     position: absolute;
     pointer-events: none;
-    background: #0b0e12;
+    background: var(--dica);
     border: 1px solid var(--borda);
     border-radius: 6px;
     padding: 6px 10px;
@@ -223,6 +369,20 @@
 
   .filtros button[aria-pressed="true"] { background: var(--destaque); color: #fff; }
 
+  /* Link de download com cara de botão (fica à direita da busca) */
+  .botao {
+    background: var(--cartao);
+    color: var(--texto);
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .botao:hover { background: var(--cartao-hover); }
+
   .filtros input {
     flex: 1;
     min-width: 160px;
@@ -244,7 +404,10 @@
 
   tbody tr { border-top: 1px solid var(--borda); cursor: pointer; }
 
-  tbody tr:hover, tbody tr:focus { background: #28313c; outline: none; }
+  /* Listras: o olho segue a linha até o fim */
+  tbody tr:nth-child(even) { background: var(--linha-impar); }
+
+  tbody tr:hover, tbody tr:focus { background: var(--cartao-hover); outline: none; }
 
   td.numero { font-variant-numeric: tabular-nums; }
 
@@ -284,16 +447,33 @@
 <body>
 
 <header>
-  <h1>SafeTech Entry</h1>
+  <div class="marca">
+    <!-- Escudo com "visto": o mesmo ícone do aplicativo de mesa -->
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M50 4 88 17v31l-8 22-30 26-30-26-8-22V17Z" fill="#3b82f6"/>
+      <path d="M50 4 88 17v31l-8 22-30 26Z" fill="#2563eb"/>
+      <path d="M31 50 45 64 71 36" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h1>SafeTech Entry</h1>
+  </div>
   <span class="subtitulo">Painel do gerente</span>
   <span class="etiqueta">Somente leitura</span>
   <div class="conexao">
+    <!-- Só muda a aparência NESTE navegador: nada é enviado ao sistema -->
+    <button type="button" class="botao-tema" id="botao-tema"></button>
+    <span class="relogio" id="relogio"></span>
     <span class="ponto" id="ponto-conexao"></span>
     <span id="texto-conexao">Conectando...</span>
   </div>
 </header>
 
 <main>
+
+  <!-- ====================== ÁREAS (com 2 câmeras ou mais) ====================== -->
+  <section class="secao larga" id="secao-areas" hidden>
+    <h2>Áreas <span class="apoio">situação de cada câmera agora</span></h2>
+    <div class="areas" id="lista-areas"></div>
+  </section>
 
   <!-- ====================== AO VIVO ====================== -->
   <section class="secao">
@@ -302,6 +482,7 @@
     <div class="video">
       <img id="imagem-ao-vivo" alt="Imagem atual da câmera da catraca" hidden>
       <div class="mensagem" id="mensagem-video">Aguardando o aplicativo...</div>
+      <div class="ao-vivo" id="selo-ao-vivo" hidden>AO VIVO</div>
     </div>
 
     <div class="faixa" id="faixa-status">
@@ -317,7 +498,7 @@
     <h2>Hoje</h2>
 
     <div class="indicadores">
-      <div class="indicador">
+      <div class="indicador neutro">
         <div class="titulo">Eventos</div>
         <div class="valor" id="hoje-total">0</div>
         <div class="rodape" id="geral-total"></div>
@@ -327,12 +508,12 @@
         <div class="valor" id="hoje-taxa">-</div>
         <div class="rodape" id="geral-taxa"></div>
       </div>
-      <div class="indicador">
+      <div class="indicador conforme">
         <div class="titulo">Conformes</div>
         <div class="valor" id="hoje-liberados">0</div>
         <div class="rodape" id="geral-liberados"></div>
       </div>
-      <div class="indicador">
+      <div class="indicador irregular">
         <div class="titulo">Irregulares</div>
         <div class="valor" id="hoje-negados">0</div>
         <div class="rodape" id="geral-negados"></div>
@@ -359,6 +540,8 @@
       <button type="button" data-filtro="SIM" aria-pressed="false">Conformes</button>
       <button type="button" data-filtro="NAO" aria-pressed="false">Irregulares</button>
       <input type="search" id="busca" placeholder="Buscar por data, pessoa, setor, EPI..." aria-label="Buscar eventos">
+      <!-- Só baixa um arquivo (GET): o painel continua somente leitura -->
+      <a class="botao" href="/exportar.csv" download>Exportar CSV</a>
     </div>
 
     <div class="rolagem">
@@ -371,7 +554,7 @@
             <th>Setor</th>
             <th>Exigidos</th>
             <th>Faltando</th>
-            <th>Modo</th>
+            <th>Área</th>
             <th>Resultado</th>
           </tr>
         </thead>
@@ -401,6 +584,7 @@
 const el = (id) => document.getElementById(id);
 
 const INTERVALO_AO_VIVO_MS = 1000;
+const INTERVALO_AREAS_MS = 2000;
 const INTERVALO_HISTORICO_MS = 4000;
 
 let eventos = [];            // últimos eventos recebidos do servidor
@@ -446,6 +630,7 @@ async function atualizarAoVivo() {
 }
 
 function mostrarSemVideo(texto) {
+  el("selo-ao-vivo").hidden = true;
   el("imagem-ao-vivo").hidden = true;
   el("mensagem-video").hidden = false;
   el("mensagem-video").textContent = texto;
@@ -461,7 +646,7 @@ function desenharAoVivo(dados) {
   // escolha do setor é feita pelo operador, no aplicativo.
   // O modo (catraca ou vigilância) também é só informativo
   el("setor-atual").textContent = dados.setor
-    ? "Modo: " + dados.nome_modo + " · Setor: " + dados.setor + " · exige " + (dados.exigidos.join(", ") || "nenhum EPI")
+    ? (dados.area ? "Área: " + dados.area + " · " : "") + "Modo: " + dados.nome_modo + " · Setor: " + dados.setor + " · exige " + (dados.exigidos.join(", ") || "nenhum EPI")
     : "";
 
   if (!dados.camera_ativa) {
@@ -480,6 +665,8 @@ function desenharAoVivo(dados) {
   imagem.src = "/ao-vivo.jpg?t=" + Date.now();
   imagem.hidden = false;
   el("mensagem-video").hidden = true;
+  el("selo-ao-vivo").hidden = false;
+  el("selo-ao-vivo").textContent = "AO VIVO" + (dados.area ? "  ·  " + dados.area : "");
 
   const total = dados.pessoas.length;
   const liberadas = dados.pessoas.filter((p) => p.status === "liberado").length;
@@ -508,6 +695,104 @@ function desenharAoVivo(dados) {
 
     lista.append(marcador);
   }
+}
+
+
+// ============================================================
+// ÁREAS (um cartão por câmera; só aparece com duas ou mais)
+// ============================================================
+
+async function atualizarAreas() {
+  try {
+    const resposta = await fetch("/api/areas", { cache: "no-store" });
+    if (!resposta.ok) throw new Error(resposta.status);
+    desenharAreas(await resposta.json());
+  } catch (erro) {
+    // A falha de conexão já é mostrada pelo ciclo do "ao vivo"
+  }
+}
+
+function desenharAreas(areas) {
+  const secao = el("secao-areas");
+  const lista = el("lista-areas");
+
+  // Com uma área só, o "Ao vivo" já mostra tudo
+  secao.hidden = areas.length < 2;
+  if (secao.hidden) return;
+
+  lista.replaceChildren();
+
+  for (const area of areas) {
+    const cartao = criar("div", undefined, "area " + area.acesso);
+
+    if (area.camera_ativa) {
+      const imagem = criar("img");
+      // O número no endereço impede o navegador de reaproveitar a imagem anterior
+      imagem.src = "/ao-vivo.jpg?area=" + area.indice + "&t=" + Date.now();
+      imagem.alt = "Imagem atual da área " + area.area;
+      cartao.append(imagem);
+    } else {
+      cartao.append(criar("div", "Câmera desligada", "sem-video"));
+    }
+
+    const info = criar("div", undefined, "info");
+    const marcador = criar("span", area.titulo, "marcador " + area.acesso);
+
+    let apoio = area.nome_modo + " · Setor: " + (area.setor || "-");
+    if (area.camera_ativa) apoio += " · " + area.pessoas + (area.pessoas === 1 ? " pessoa" : " pessoas");
+    if (area.irregulares) apoio += " (" + area.irregulares + " irregular" + (area.irregulares === 1 ? ")" : "es)");
+    if (area.comanda_catraca) apoio += " · comanda a catraca";
+
+    info.append(criar("span", area.area, "nome"), marcador, criar("span", apoio, "apoio"));
+    cartao.append(info);
+
+    lista.append(cartao);
+  }
+}
+
+
+// ============================================================
+// TEMA ESCURO / CLARO
+// ============================================================
+//
+// A escolha fica guardada só neste navegador (localStorage). Sem
+// escolha, a página segue o tema do sistema do aparelho. Guardar pode
+// falhar (janela anônima, armazenamento bloqueado): a página continua
+// funcionando, só não lembra a escolha.
+
+const CHAVE_TEMA = "safetech-tema";
+
+function temaGuardado() {
+  try { return localStorage.getItem(CHAVE_TEMA); } catch (erro) { return null; }
+}
+
+function temaEmUso() {
+  const escolhido = document.documentElement.dataset.tema;
+  if (escolhido) return escolhido;
+  return matchMedia("(prefers-color-scheme: light)").matches ? "claro" : "escuro";
+}
+
+function aplicarTema(nome) {
+  if (nome) document.documentElement.dataset.tema = nome;
+  // O botão mostra o tema para o qual ele muda
+  el("botao-tema").textContent = temaEmUso() === "escuro" ? "\u2600 Tema claro" : "\u263E Tema escuro";
+}
+
+el("botao-tema").addEventListener("click", () => {
+  const novo = temaEmUso() === "escuro" ? "claro" : "escuro";
+  try { localStorage.setItem(CHAVE_TEMA, novo); } catch (erro) { /* só não lembra */ }
+  aplicarTema(novo);
+});
+
+aplicarTema(temaGuardado());
+
+
+// ============================================================
+// RELÓGIO DO CABEÇALHO
+// ============================================================
+
+function atualizarRelogio() {
+  el("relogio").textContent = new Date().toLocaleString("pt-BR");
 }
 
 
@@ -709,7 +994,7 @@ function desenharTabela() {
       criar("td", evento.setor),
       criar("td", evento.exigidos || "-"),
       criar("td", evento.faltando || "-"),
-      criar("td", evento.nome_modo),
+      criar("td", evento.area || "-"),
       celulaAcesso,
     );
 
@@ -733,7 +1018,7 @@ function abrirFoto(evento) {
   el("detalhes-foto").replaceChildren(
     criar("span", evento.resultado, "marcador " + (liberado ? "liberado" : "negado")),
     criar("strong", evento.timestamp),
-    criar("span", "Modo: " + evento.nome_modo),
+    criar("span", "Área: " + (evento.area || "-") + " · Modo: " + evento.nome_modo),
     criar("span", "Pessoa " + evento.pessoa),
     criar("span", "Setor: " + evento.setor),
     criar("span", evento.faltando ? "Faltando: " + evento.faltando : "Nada faltando"),
@@ -770,10 +1055,14 @@ el("janela-foto").addEventListener("click", (evento) => {
 // INÍCIO: busca os dados agora e depois em intervalos fixos
 // ============================================================
 
+atualizarRelogio();
 atualizarAoVivo();
+atualizarAreas();
 atualizarHistorico();
 
+setInterval(atualizarRelogio, 1000);
 setInterval(atualizarAoVivo, INTERVALO_AO_VIVO_MS);
+setInterval(atualizarAreas, INTERVALO_AREAS_MS);
 setInterval(atualizarHistorico, INTERVALO_HISTORICO_MS);
 </script>
 

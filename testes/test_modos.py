@@ -266,9 +266,9 @@ def test_tabela_mostra_o_resultado_no_texto_do_modo(raiz, sem_ia):
 
         linhas = [tabela.item(linha, "values") for linha in tabela.get_children()]
 
-        # Mais recente primeiro: a da vigilância
-        assert linhas[0][-2:] == ("Vigilância", "Não conforme")
-        assert linhas[1][-2:] == ("Catraca", "Negado")
+        # Mais recente primeiro: a da vigilância (Área, Resultado)
+        assert linhas[0][-2:] == (config.NOME_AREA_PADRAO, "Não conforme")
+        assert linhas[1][-2:] == (config.NOME_AREA_PADRAO, "Negado")
 
     finally:
         tela._ao_fechar()

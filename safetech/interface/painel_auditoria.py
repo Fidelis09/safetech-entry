@@ -3,16 +3,21 @@ Painel de auditoria (lado direito da janela).
 
 Mostra, na mesma tela do vídeo:
 
-    - cartões com os totais (eventos, conformes, irregulares, taxa de
-      conformidade). "Conforme" vale para os dois modos: na catraca é
-      quem foi liberado; na vigilância, quem estava com todos os EPIs;
-    - filtros (por texto e por resultado);
+    - cartões com os totais do período (eventos, conformes, irregulares,
+      taxa de conformidade). "Conforme" vale para os dois modos: na
+      catraca é quem foi liberado; na vigilância, quem estava com todos
+      os EPIs;
+    - filtros (por resultado, por período e por texto);
     - a tabela de eventos, atualizada ao vivo, com ordenação por coluna;
-    - a foto de evidência do evento selecionado;
-    - o botão "Salvar relatório", que grava um relatório completo do
-      momento do evento selecionado (auditoria/relatorios);
-    - o botão "Excluir linha", que tira o evento selecionado do log
-      (movendo-o para auditoria/excluidos, sem apagar).
+    - "Exportar CSV": grava o que está filtrado numa planilha;
+    - a foto de evidência do evento selecionado, com dois botões:
+      "Salvar relatório" (relatório completo do momento, em
+      auditoria/relatorios) e "Excluir" (tira o evento do log,
+      movendo-o para auditoria/excluidos, sem apagar).
+
+A auditoria acompanha o que está na tela da esquerda: com uma área
+aberta, mostra só os eventos DELA (cartões, tabela e exportação); na
+visão geral, os de todas. O título diz qual é ("Auditoria · Portaria").
 
 Os registros ficam guardados em memória. Quando chega um evento novo
 ele é apenas inserido no topo da tabela; o CSV não é relido.
@@ -20,6 +25,7 @@ ele é apenas inserido no topo da tabela; o CSV não é relido.
 
 import os
 import tkinter as tk
+from datetime import date, timedelta
 from tkinter import ttk
 
 from PIL import Image, ImageTk
@@ -31,13 +37,22 @@ from safetech.nucleo import modos
 
 # Colunas da tabela: (campo do registro, título exibido, largura, alinhamento)
 COLUNAS_TABELA = [
-    ("timestamp", "Data e hora", 145, "w"),
+    ("timestamp", "Data e hora", 150, "w"),
     ("pessoa", "Pessoa", 60, "center"),
-    ("setor", "Setor", 130, "w"),
-    ("faltando", "Faltando", 130, "w"),
-    ("modo", "Modo", 80, "center"),
-    ("liberado", "Resultado", 95, "center"),
+    ("setor", "Setor", 125, "w"),
+    ("faltando", "Faltando", 160, "w"),
+    ("area", "Área", 95, "w"),
+    ("liberado", "Resultado", 100, "center"),
 ]
+
+# Texto ao lado do título quando a auditoria mostra todas as áreas
+TEXTO_TODAS_AS_AREAS = "Todas as áreas"
+
+# Textos mostrados no lugar da tabela quando ela está vazia
+TEXTO_SEM_EVENTOS = "Nenhum evento registrado ainda.\nOs eventos aparecem aqui assim que alguém é analisado."
+TEXTO_FILTRO_VAZIO = "Nenhum evento para os filtros escolhidos."
+TEXTO_AREA_SEM_EVENTOS = "Nenhum evento registrado nesta área ainda."
+TEXTO_SEM_SELECAO = "Selecione um evento para ver a foto. Duplo clique abre em tamanho real."
 
 # Filtro por resultado: o valor é o da coluna "liberado" do CSV
 # (SIM = conforme / liberado, NAO = irregular / negado)
@@ -50,13 +65,16 @@ ALTURA_EVIDENCIA = 190
 
 class PainelAuditoria(ttk.Frame):
 
-    def __init__(self, pai, pasta_imagens, ao_zerar, ao_excluir, ao_salvar_relatorio, escala=1.0):
+    def __init__(self, pai, pasta_imagens, ao_zerar, ao_excluir, ao_salvar_relatorio, ao_exportar=None, escala=1.0):
         """
         ao_zerar            -> chamado pelo botão "Zerar" (sem argumentos).
-        ao_excluir          -> chamado pelo botão "Excluir linha" com o
+        ao_excluir          -> chamado pelo botão "Excluir" com o
                                registro da linha selecionada.
         ao_salvar_relatorio -> chamado pelo botão "Salvar relatório" com
                                o registro da linha selecionada.
+        ao_exportar         -> chamado pelo botão "Exportar CSV" com a
+                               lista dos registros que passam nos filtros
+                               (do mais antigo para o mais recente).
 
         Quem confirma com o usuário e mexe nos arquivos é a janela
         principal; o painel só diz qual linha foi escolhida.
@@ -67,6 +85,7 @@ class PainelAuditoria(ttk.Frame):
         self._ao_zerar = ao_zerar
         self._ao_excluir = ao_excluir
         self._ao_salvar_relatorio = ao_salvar_relatorio
+        self._ao_exportar = ao_exportar
         self._pasta_imagens = pasta_imagens
         self._escala = escala
         self._altura_evidencia = int(ALTURA_EVIDENCIA * escala)
@@ -82,6 +101,10 @@ class PainelAuditoria(ttk.Frame):
 
         self._texto_filtro = tk.StringVar()
         self._filtro_resultado = tk.StringVar(value=FILTRO_TODOS)
+        self._periodo = tk.StringVar(value=config.PERIODO_AUDITORIA_PADRAO)
+
+        # Área cujos eventos aparecem (None = todas as áreas)
+        self._area = None
 
         self._imagem_evidencia = None
 
@@ -107,46 +130,40 @@ class PainelAuditoria(ttk.Frame):
             cabecalho, text="Auditoria", style="Titulo.Painel.TLabel"
         ).pack(side="left")
 
+        # De qual área são os eventos mostrados ("· Portaria" ou "· Todas as áreas")
+        self._rotulo_area = ttk.Label(cabecalho, text="", style="Suave.Painel.TLabel", font=FONTES["texto_negrito"])
+        self._rotulo_area.pack(side="left", padx=(8, 0), pady=(3, 0))
+        self._atualizar_rotulo_area()
+
+        # Ações sobre a auditoria INTEIRA. As que agem sobre UMA linha
+        # (relatório e excluir) ficam no cartão do evento selecionado,
+        # embaixo, junto da foto.
+        #
+        # Zerar fica por último e em tom discreto: é a mais drástica.
+        # Quem confirma com o usuário e arquiva os dados é a janela principal.
+        ttk.Button(
+            cabecalho,
+            text="Zerar",
+            style="Suave.Perigo.TButton",
+            command=self._ao_zerar,
+            takefocus=False,
+        ).pack(side="right")
+
         ttk.Button(
             cabecalho,
             text="Abrir pasta",
             command=self._abrir_pasta,
             takefocus=False,
-        ).pack(side="right")
-
-        # Botão pequeno para começar do zero. Quem confirma com o
-        # usuário e arquiva os dados é a janela principal.
-        ttk.Button(
-            cabecalho,
-            text="Zerar",
-            style="Pequeno.Perigo.TButton",
-            command=self._ao_zerar,
-            takefocus=False,
         ).pack(side="right", padx=(0, 8))
 
-        # Exclui só a linha selecionada na tabela. Começa desativado e
-        # é ativado quando o usuário escolhe uma linha.
-        self._botao_excluir = ttk.Button(
+        # Planilha com o que está filtrado na tela (período, resultado, busca)
+        self._botao_exportar = ttk.Button(
             cabecalho,
-            text="Excluir linha",
-            style="Pequeno.Perigo.TButton",
-            command=self._excluir_selecionado,
+            text="Exportar CSV",
+            command=self._exportar_filtrados,
             takefocus=False,
-            state="disabled",
         )
-        self._botao_excluir.pack(side="right", padx=(0, 8))
-
-        # Relatório completo do momento da linha selecionada (dados do
-        # evento, confiança de cada EPI e a foto). Também começa
-        # desativado, até o usuário escolher uma linha.
-        self._botao_relatorio = ttk.Button(
-            cabecalho,
-            text="Salvar relatório",
-            command=self._salvar_relatorio_selecionado,
-            takefocus=False,
-            state="disabled",
-        )
-        self._botao_relatorio.pack(side="right", padx=(0, 8))
+        self._botao_exportar.pack(side="right", padx=(0, 8))
 
     def _montar_indicadores(self):
 
@@ -157,19 +174,25 @@ class PainelAuditoria(ttk.Frame):
         # Nomes que servem aos dois modos (catraca e vigilância)
         self._valor_liberados = self._criar_indicador(linha, 1, "Conformes", CORES["sucesso_texto"])
         self._valor_negados = self._criar_indicador(linha, 2, "Irregulares", CORES["perigo_texto"])
-        self._valor_taxa = self._criar_indicador(linha, 3, "Conformidade", CORES["texto"])
+        self._valor_taxa = self._criar_indicador(linha, 3, "Conformidade", CORES["destaque"])
 
     def _criar_indicador(self, pai, coluna, titulo, cor_valor):
-        """Cria um cartão de indicador; devolve o rótulo do valor."""
+        """Cria um cartão de indicador (com um filete colorido no topo); devolve o rótulo do valor."""
 
         pai.columnconfigure(coluna, weight=1, uniform="indicadores")
 
-        cartao = ttk.Frame(pai, style="Cartao.TFrame", padding=(14, 10))
+        cartao = ttk.Frame(pai, style="Cartao.TFrame")
         cartao.grid(row=0, column=coluna, sticky="ew", padx=(0 if coluna == 0 else 8, 0))
 
-        ttk.Label(cartao, text=titulo, style="Suave.Cartao.TLabel").pack(anchor="w")
+        # Filete na cor do indicador: identifica o cartão de relance
+        tk.Frame(cartao, bg=cor_valor, height=3).pack(fill="x")
 
-        valor = ttk.Label(cartao, text="0", style="Valor.Cartao.TLabel", foreground=cor_valor)
+        miolo = ttk.Frame(cartao, style="Cartao.TFrame", padding=(14, 8, 14, 10))
+        miolo.pack(fill="x")
+
+        ttk.Label(miolo, text=titulo, style="Suave.Cartao.TLabel").pack(anchor="w")
+
+        valor = ttk.Label(miolo, text="0", style="Valor.Cartao.TLabel", foreground=cor_valor)
         valor.pack(anchor="w")
 
         return valor
@@ -196,10 +219,23 @@ class PainelAuditoria(ttk.Frame):
                 takefocus=False,
             ).pack(side="left", padx=(0, 4))
 
-        self._campo_filtro = ttk.Entry(linha, textvariable=self._texto_filtro)
-        self._campo_filtro.pack(side="right", fill="x", expand=True, padx=(12, 0))
+        # Período: os cartões, a tabela e a exportação o seguem
+        caixa_periodo = ttk.Combobox(
+            linha,
+            textvariable=self._periodo,
+            values=list(config.PERIODOS_AUDITORIA),
+            state="readonly",
+            width=15,
+            style="Pequena.TCombobox",
+            takefocus=False,
+        )
+        caixa_periodo.pack(side="left", padx=(8, 0))
+        caixa_periodo.bind("<<ComboboxSelected>>", lambda _evento: self._ao_mudar_periodo(caixa_periodo))
 
-        ttk.Label(linha, text="Buscar", style="Suave.Painel.TLabel").pack(side="right")
+        self._campo_filtro = ttk.Entry(linha, textvariable=self._texto_filtro)
+        self._campo_filtro.pack(side="right", fill="x", expand=True, padx=(8, 0))
+
+        ttk.Label(linha, text="Buscar", style="Suave.Painel.TLabel").pack(side="right", padx=(12, 0))
 
         # Refaz a tabela a cada tecla digitada na busca
         self._texto_filtro.trace_add("write", lambda *_: self._redesenhar_tabela())
@@ -235,9 +271,17 @@ class PainelAuditoria(ttk.Frame):
                 anchor=alinhamento,
             )
 
-        # Cores das linhas conforme o resultado
-        self._tabela.tag_configure("liberado", foreground=CORES["sucesso_texto"])
-        self._tabela.tag_configure("negado", foreground=CORES["perigo_texto"])
+        self.aplicar_cores()
+
+        # Mensagem no meio da tabela quando ela está vazia
+        self._rotulo_tabela_vazia = tk.Label(
+            moldura,
+            text=TEXTO_SEM_EVENTOS,
+            bg=CORES["cartao"],
+            fg=CORES["texto_suave"],
+            font=FONTES["texto"],
+            justify="center",
+        )
 
         barra = ttk.Scrollbar(moldura, orient="vertical", command=self._tabela.yview)
         self._tabela.configure(yscrollcommand=barra.set)
@@ -256,12 +300,42 @@ class PainelAuditoria(ttk.Frame):
         cartao = ttk.Frame(self, style="Cartao.TFrame", padding=12)
         cartao.grid(row=4, column=0, sticky="ew", pady=(12, 0))
 
+        cabeca = ttk.Frame(cartao, style="Cartao.TFrame")
+        cabeca.pack(fill="x")
+
         ttk.Label(
-            cartao,
-            text="Foto de evidência",
+            cabeca,
+            text="Evento selecionado",
             style="Cartao.TLabel",
             font=FONTES["texto_negrito"],
-        ).pack(anchor="w")
+        ).pack(side="left")
+
+        # Os dois botões agem sobre a linha escolhida na tabela: começam
+        # desativados e são ativados quando o usuário escolhe uma linha.
+        #
+        # Excluir tira o evento do log (a janela principal confirma e o
+        # guarda em auditoria/excluidos; nada é apagado).
+        self._botao_excluir = ttk.Button(
+            cabeca,
+            text="Excluir",
+            style="Suave.Perigo.TButton",
+            command=self._excluir_selecionado,
+            takefocus=False,
+            state="disabled",
+        )
+        self._botao_excluir.pack(side="right")
+
+        # Relatório completo do momento (dados do evento, confiança de
+        # cada EPI e a foto), aberto no navegador
+        self._botao_relatorio = ttk.Button(
+            cabeca,
+            text="Salvar relatório",
+            style="Secundario.TButton",
+            command=self._salvar_relatorio_selecionado,
+            takefocus=False,
+            state="disabled",
+        )
+        self._botao_relatorio.pack(side="right", padx=(0, 8))
 
         self._rotulo_evidencia = tk.Label(
             cartao,
@@ -282,9 +356,7 @@ class PainelAuditoria(ttk.Frame):
         )
         self._rotulo_detalhes.pack(anchor="w", pady=(6, 0))
 
-        self._mostrar_texto_evidencia(
-            "Selecione um evento para ver a foto. Duplo clique abre em tamanho real."
-        )
+        self._mostrar_texto_evidencia(TEXTO_SEM_SELECAO)
 
     # ============================================================
     # DADOS
@@ -321,6 +393,9 @@ class PainelAuditoria(ttk.Frame):
             if len(linhas) > config.MAXIMO_LINHAS_TABELA:
                 self._remover_linha(linhas[-1])
 
+            # A linha nova empurrou as outras: refaz as listras
+            self._reaplicar_listras()
+
     def remover(self, registro):
         """Tira um evento da tela (depois de excluído do log)."""
 
@@ -347,9 +422,56 @@ class PainelAuditoria(ttk.Frame):
 
         self._ativar_botoes_da_linha(False)
 
-        self._mostrar_texto_evidencia(
-            "Selecione um evento para ver a foto. Duplo clique abre em tamanho real."
-        )
+        self._mostrar_texto_evidencia(TEXTO_SEM_SELECAO)
+
+    def aplicar_cores(self):
+        """
+        Cores das linhas conforme o resultado, e listras alternadas no
+        fundo para o olho seguir a linha até o fim.
+
+        Chamado ao montar e depois de trocar o tema: as cores das linhas
+        ficam guardadas na tabela, não nos componentes.
+        """
+
+        self._tabela.tag_configure("liberado", foreground=CORES["sucesso_texto"])
+        self._tabela.tag_configure("negado", foreground=CORES["perigo_texto"])
+        self._tabela.tag_configure("par", background=CORES["linha_par"])
+        self._tabela.tag_configure("impar", background=CORES["linha_impar"])
+
+    def definir_area(self, nome):
+        """
+        Mostra só os eventos da área 'nome' (None = de todas as áreas).
+
+        Chamado pela janela principal quando o operador abre uma área ou
+        a visão geral. Os cartões, a tabela e a exportação seguem junto.
+        """
+
+        if nome == self._area:
+            return
+
+        self._area = nome
+
+        self._atualizar_rotulo_area()
+        self._atualizar_indicadores()
+        self._redesenhar_tabela()
+
+        # A linha que estava selecionada pode não estar mais na tabela
+        self._limpar_evidencia()
+
+    @property
+    def area(self):
+        """Área mostrada (None = todas)."""
+
+        return self._area
+
+    def _atualizar_rotulo_area(self):
+
+        self._rotulo_area.config(text="\u00b7  " + (self._area or TEXTO_TODAS_AS_AREAS))
+
+    def _da_area(self, registro) -> bool:
+        """O evento é da área mostrada? (sempre, quando são todas)"""
+
+        return self._area is None or registro.area == self._area
 
     def limpar_filtro(self):
 
@@ -366,8 +488,12 @@ class PainelAuditoria(ttk.Frame):
 
     def _atualizar_indicadores(self):
 
-        total = len(self._registros)
-        liberados = sum(1 for registro in self._registros if registro.liberado == "SIM")
+        do_periodo = [
+            registro for registro in self._registros if self._no_periodo(registro) and self._da_area(registro)
+        ]
+
+        total = len(do_periodo)
+        liberados = sum(1 for registro in do_periodo if registro.liberado == "SIM")
 
         self._valor_total.config(text=str(total))
         self._valor_liberados.config(text=str(liberados))
@@ -381,7 +507,32 @@ class PainelAuditoria(ttk.Frame):
     # TABELA
     # ============================================================
 
+    def _no_periodo(self, registro) -> bool:
+        """O evento aconteceu dentro do período escolhido?"""
+
+        dias = config.PERIODOS_AUDITORIA.get(self._periodo.get())
+
+        if dias is None:
+            return True
+
+        # As datas do log são "AAAA-MM-DD HH:MM:SS": comparar o texto
+        # da data já compara a ordem cronológica
+        limite = (date.today() - timedelta(days=dias)).isoformat()
+
+        return registro.timestamp[:10] >= limite
+
+    def _ao_mudar_periodo(self, caixa):
+
+        # Tira a seleção azul do texto, que o Tkinter deixa na caixa
+        caixa.selection_clear()
+
+        self._atualizar_indicadores()
+        self._redesenhar_tabela()
+
     def _passa_no_filtro(self, registro) -> bool:
+
+        if not self._no_periodo(registro) or not self._da_area(registro):
+            return False
 
         resultado = self._filtro_resultado.get()
 
@@ -416,6 +567,43 @@ class PainelAuditoria(ttk.Frame):
         for registro in visiveis[: config.MAXIMO_LINHAS_TABELA]:
             self._inserir_linha(registro, posicao="end")
 
+        self._reaplicar_listras()
+
+    def registros_filtrados(self):
+        """Todos os registros que passam nos filtros (sem o limite de linhas da tela), do mais antigo ao mais recente."""
+
+        return [registro for registro in self._registros if self._passa_no_filtro(registro)]
+
+    def _reaplicar_listras(self):
+        """
+        Pinta as linhas alternadas e mostra a mensagem de tabela vazia.
+
+        As listras são refeitas a cada mudança porque uma linha nova no
+        topo troca a posição (par/ímpar) de todas as outras.
+        """
+
+        linhas = self._tabela.get_children()
+
+        for posicao, linha in enumerate(linhas):
+
+            registro = self._registro_por_linha.get(linha)
+            resultado = "liberado" if registro is not None and registro.liberado == "SIM" else "negado"
+
+            self._tabela.item(linha, tags=(resultado, "par" if posicao % 2 == 0 else "impar"))
+
+        if linhas:
+            self._rotulo_tabela_vazia.place_forget()
+        else:
+            if not self._registros:
+                texto = TEXTO_SEM_EVENTOS
+            elif not any(self._da_area(registro) for registro in self._registros):
+                texto = TEXTO_AREA_SEM_EVENTOS
+            else:
+                texto = TEXTO_FILTRO_VAZIO
+
+            self._rotulo_tabela_vazia.config(text=texto)
+            self._rotulo_tabela_vazia.place(relx=0.5, rely=0.4, anchor="center")
+
     def _inserir_linha(self, registro, posicao):
 
         liberado = registro.liberado == "SIM"
@@ -425,7 +613,7 @@ class PainelAuditoria(ttk.Frame):
             registro.pessoa,
             registro.setor,
             registro.faltando or "-",
-            modos.nome_do_modo(registro.modo),
+            registro.area,
             # "Liberado"/"Negado" na catraca; "Conforme"/"Não conforme" na vigilância
             modos.resultado(registro.modo, liberado),
         ]
@@ -487,7 +675,7 @@ class PainelAuditoria(ttk.Frame):
 
         self._rotulo_detalhes.config(
             text=(
-                f"{evento}   |   Modo: {modos.nome_do_modo(registro.modo)}   |   "
+                f"{evento}   |   Área: {registro.area}   |   Modo: {modos.nome_do_modo(registro.modo)}   |   "
                 f"Exigidos: {registro.exigidos or 'nenhum'}\n"
                 f"Confiança: {registro.confiancas or '-'}"
             )
@@ -553,6 +741,12 @@ class PainelAuditoria(ttk.Frame):
 
         if registro is not None:
             self._ao_salvar_relatorio(registro)
+
+    def _exportar_filtrados(self):
+        """Botão "Exportar CSV": repassa à janela principal o que está filtrado."""
+
+        if self._ao_exportar is not None:
+            self._ao_exportar(self.registros_filtrados())
 
     def _excluir_selecionado(self):
         """Botão "Excluir linha" (ou tecla Delete): repassa à janela principal."""

@@ -19,6 +19,8 @@ Enquanto o cabo estiver mandando dados, o Wi-Fi nem é consultado. **Se o cabo s
 | Sem dados do programa (cabo solto, programa fechado, Wi-Fi fora, senha errada) | **Fechada** | Vermelho piscando | `OFFLINE` + "X" piscando e o motivo | - |
 | Programa no **modo Vigilância** | **Fechada** (catraca desligada) | Todos apagados | `VIGILANCIA` + "Catraca desligada" | - |
 
+**Com várias áreas (câmeras), a catraca segue só a área marcada** em Configurações > Área e câmera > "Esta área comanda a catraca física". Sem nenhuma marcada, ela fica desligada (fechada).
+
 **A catraca só obedece no modo Catraca do programa.** No modo Vigilância (fiscalização de uma área, sem acesso a liberar) ela fica desligada, qualquer que seja a situação das pessoas. Ao voltar para o modo Catraca, ela volta a obedecer na hora.
 
 **A tela OLED é monocromática** (não faz vermelho). O destaque do NEGADO vem do contraste: a tela inteira acende e pisca, com as letras pretas por cima. A cor mesmo vem dos LEDs. Para ver todos os visuais sem Wi-Fi nem programa, grave o `teste_tela` (veja "Testes antes do firmware").
@@ -122,7 +124,7 @@ Cuidados:
    - **Para usar o Wi-Fi também:** troque `WIFI_ATIVO` para `true` e preencha:
      - `WIFI_NOME` e `WIFI_SENHA`: a rede do computador (**2,4 GHz**; o ESP32 não conecta em 5 GHz);
      - `SAFETECH_IP` e `SAFETECH_PORTA`: o endereço que aparece no rodapé do programa ("Painel web: http://192.168.0.15:8080"). O IP muda de rede para rede;
-     - `SAFETECH_USUARIO` e `SAFETECH_SENHA`: o login do painel web (`PAINEL_WEB_USUARIO` e `PAINEL_WEB_SENHA` no `safetech/config.py`).
+     - `SAFETECH_USUARIO` e `SAFETECH_SENHA`: o login do painel web, definido no programa em **Configurações > Painel web** (trocou lá, troque aqui).
 
    O `config.h` pode ter senhas e **não vai para o git**.
    Para o cabo funcionar, o programa precisa do **pyserial** (`python -m pip install -r requirements.txt`).
@@ -152,7 +154,7 @@ Os dois pinos e o endereço da tela (`0x3C`) são os mesmos do firmware. Se um t
 
 **Pelo Wi-Fi** (só se `WIFI_ATIVO true`):
 
-1. **O programa está acessível na rede?** No celular, conectado ao mesmo Wi-Fi, abra `http://<IP do computador>:8080`. Se o painel web abrir, a catraca também vai conseguir. Se não abrir, permita o Python no firewall do Windows (redes privadas) e confira se `PAINEL_WEB_HOST = "0.0.0.0"`.
+1. **O programa está acessível na rede?** No celular, conectado ao mesmo Wi-Fi, abra `http://<IP do computador>:8080`. Se o painel web abrir, a catraca também vai conseguir. Se não abrir, permita o Python no firewall do Windows (redes privadas) e confira se **Permitir acesso pela rede** está marcado em Configurações > Painel web.
 2. **A resposta está certa?** No navegador, abra `http://<IP>:8080/api/ao-vivo`. Deve aparecer algo como `"acesso": "negado"` e `"faltando": ["Capacete"]`.
 3. **A catraca reage?** Com o ESP32 ligado, fique na frente da câmera, sem e depois com o capacete.
 

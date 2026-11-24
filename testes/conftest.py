@@ -14,6 +14,7 @@ garantir duas regras:
        estar usando o computador enquanto os testes rodam.
 """
 
+import gc
 import tempfile
 import time
 import tkinter as tk
@@ -35,6 +36,7 @@ config.ARQUIVO_LOG_AUDITORIA = config.PASTA_AUDITORIA / "log_auditoria.csv"
 config.PASTA_IMAGENS_AUDITORIA = config.PASTA_AUDITORIA / "imagens"
 config.PASTA_EXCLUIDOS = config.PASTA_AUDITORIA / "excluidos"
 config.PASTA_RELATORIOS = config.PASTA_AUDITORIA / "relatorios"
+config.PASTA_CAPTURAS = config.PASTA_AUDITORIA / "capturas"
 config.PASTA_IMAGENS_DATASET = PASTA_TEMPORARIA / "dataset" / "epis"
 config.ARQUIVO_ROTULOS = PASTA_TEMPORARIA / "dataset" / "rotulos.csv"
 config.ARQUIVO_PREFERENCIAS = PASTA_TEMPORARIA / "preferencias.json"
@@ -48,10 +50,34 @@ config.PAINEL_WEB_ATIVO = False
 config.CATRACA_SERIAL_ATIVA = False
 config.PAINEL_WEB_HOST = "127.0.0.1"
 
+# Sem bipes durante os testes (eles registram vários "negados")
+config.ALERTA_SONORO_NEGADO = False
+
+# Hash da senha do painel bem mais rápido nos testes (no programa de
+# verdade ele é lento de propósito). O formato é o mesmo.
+config.ITERACOES_HASH_SENHA = 1000
+
 
 # ============================================================
 # FIXTURES (peças prontas que os testes pedem pelo nome)
 # ============================================================
+
+@pytest.fixture(autouse=True)
+def preferencias_zeradas():
+    """
+    Cada teste começa sem preferências salvas.
+
+    O arquivo é um só para todos os testes (os serviços leem o caminho
+    na importação). Sem isto, as áreas e câmeras que um teste cria
+    apareceriam no teste seguinte.
+    """
+
+    config.ARQUIVO_PREFERENCIAS.unlink(missing_ok=True)
+
+    yield
+
+    config.ARQUIVO_PREFERENCIAS.unlink(missing_ok=True)
+
 
 @pytest.fixture
 def auditoria(tmp_path):
@@ -72,7 +98,7 @@ def criar_janela_tk(tentativas=5):
 
     No Python da Microsoft Store, criar muitas janelas seguidas às vezes
     falha ao ler os arquivos do próprio Tk ("Can't find a usable
-    init.tcl" ou "tk.tcl", com "No error"). É uma falha passageira do
+    init.tcl", "tk.tcl", "couldn't read file ... auto.tcl"). É uma falha passageira do
     Windows, não do programa: na tentativa seguinte, abre normalmente.
     """
 
@@ -83,7 +109,10 @@ def criar_janela_tk(tentativas=5):
 
         except tk.TclError as erro:
 
-            passageira = "usable init.tcl" in str(erro) or "usable tk.tcl" in str(erro)
+            mensagem = str(erro)
+
+            # Falha ao LER um arquivo .tcl do próprio Tk (init.tcl, tk.tcl, auto.tcl...)
+            passageira = ".tcl" in mensagem and ("usable" in mensagem or "couldn't read file" in mensagem)
 
             if not passageira or tentativa == tentativas - 1:
                 raise
@@ -104,6 +133,10 @@ def raiz():
     janela = criar_janela_tk()
     janela.withdraw()
 
+    # Sempre começa no tema escuro: um teste que troca o tema não pode
+    # deixar as cores trocadas para o teste seguinte
+    tema.definir_paleta(tema.TEMA_PADRAO)
+
     tema.aplicar_tema(janela, 1.0)
 
     yield janela
@@ -112,6 +145,11 @@ def raiz():
         janela.destroy()
     except tk.TclError:
         pass  # o teste já fechou a janela
+
+    # Recolhe agora, na thread principal, as variáveis do Tk que
+    # sobraram da janela. Se ficassem para depois, poderiam ser
+    # recolhidas por outra thread (a de uma análise), e o Tk reclama.
+    gc.collect()
 
 
 @pytest.fixture

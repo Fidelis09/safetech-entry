@@ -44,7 +44,8 @@ class EstadoCamera(Enum):
     ATIVA = "ativa"
     ERRO = "erro"
 
-    # Câmera IP que perdeu a conexão: o programa tenta de novo sozinho
+    # Câmera que parou de responder no meio do uso (rede da câmera IP,
+    # cabo da webcam): o programa tenta de novo sozinho
     RECONECTANDO = "reconectando"
 
 
@@ -206,17 +207,18 @@ class Camera:
                     self._frame = None
                     self._fps = 0.0
 
-                # Webcam desconectada: erro, o usuário decide o que fazer
-                if not self.e_camera_ip:
+                # Webcam que parou de responder, com a reconexão
+                # desligada: erro, o usuário decide o que fazer
+                if not self.e_camera_ip and not config.RECONECTAR_WEBCAM:
 
                     with self._trava:
                         self._estado = EstadoCamera.ERRO
 
                     return
 
-                # Câmera IP: quedas de rede costumam ser passageiras,
-                # então o programa tenta reconectar sozinho até
-                # conseguir (ou até o usuário parar a câmera).
+                # Quedas costumam ser passageiras (rede instável na câmera
+                # IP, cabo USB frouxo na webcam), então o programa tenta
+                # reabrir sozinho até conseguir (ou até o usuário parar).
                 captura = self._reconectar()
 
         finally:
@@ -266,12 +268,17 @@ class Camera:
                 inicio_periodo = time.perf_counter()
 
     def _reconectar(self):
-        """Tenta abrir a câmera IP de novo, de tempos em tempos. None se mandaram parar."""
+        """Tenta abrir a câmera de novo, de tempos em tempos. None se mandaram parar."""
 
         with self._trava:
             self._estado = EstadoCamera.RECONECTANDO
 
-        while not self._parar.wait(config.INTERVALO_RECONEXAO_IP_SEG):
+        if self.e_camera_ip:
+            intervalo = config.INTERVALO_RECONEXAO_IP_SEG
+        else:
+            intervalo = config.INTERVALO_RECONEXAO_WEBCAM_SEG
+
+        while not self._parar.wait(intervalo):
 
             captura = self._abrir()
 

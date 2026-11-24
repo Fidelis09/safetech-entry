@@ -6,8 +6,11 @@ Roda em uma thread própria, dentro do aplicativo, e entrega:
     /                 -> a página do painel
     /api/ao-vivo      -> status atual da catraca e das pessoas (JSON)
     /api/historico    -> totais, eventos por hora e lista de eventos (JSON)
+    /api/areas        -> situação de cada área (câmera), para a visão geral
     /ao-vivo.jpg      -> imagem atual da câmera, com as caixas desenhadas
+                         (?area=N: a imagem da área N da lista de /api/areas)
     /imagens/<nome>   -> foto de evidência de um evento
+    /exportar.csv     -> o histórico inteiro numa planilha (download)
 
 SOMENTE LEITURA: o servidor só aceita pedidos GET. Qualquer outro
 método (POST, PUT, DELETE...) é recusado, e nenhuma rota altera
@@ -15,7 +18,7 @@ configurações, apaga registros ou controla a câmera.
 """
 
 import base64
-import hmac
+import hashlib
 import json
 import socket
 import threading
@@ -24,14 +27,16 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import cv2
 
 from safetech import config
 from safetech.nucleo import anotacao, modos
 from safetech.nucleo.epis import nome_do_epi
-from safetech.nucleo.tipos import EstadoCena
+from safetech.nucleo.tipos import EstadoCena, StatusPessoa
+from safetech.servicos import acesso_web
+from safetech.servicos.auditoria import gerar_csv_exportacao
 
 
 ARQUIVO_PAGINA = Path(__file__).resolve().parent / "painel.html"
@@ -43,19 +48,36 @@ class ServidorWeb:
         self,
         auditoria,
         fonte_ao_vivo=None,
-        host=config.PAINEL_WEB_HOST,
-        porta=config.PAINEL_WEB_PORTA,
+        host=None,
+        porta=None,
+        fonte_areas=None,
+        ajustes=None,
     ):
         """
         auditoria      -> ServicoAuditoria, de onde vêm os eventos e as fotos
         fonte_ao_vivo  -> função que devolve (frame, EstadoCena) do momento;
                           None quando não há câmera (painel só com histórico)
+        fonte_areas    -> função que devolve TODAS as áreas, como lista de
+                          (nome, frame, EstadoCena, comanda_catraca); None
+                          sem o aplicativo
+        ajustes        -> AjustesPainelWeb (porta, rede, usuário, hash da
+                          senha), da tela de Configurações; None = config.py
+        host, porta    -> trocam os dos ajustes (usado nos testes)
         """
 
         self._auditoria = auditoria
         self._fonte_ao_vivo = fonte_ao_vivo
-        self._host = host
-        self._porta = porta
+        self._fonte_areas = fonte_areas
+
+        self._ajustes = ajustes or acesso_web.ajustes_padrao()
+
+        self._host = host or self._ajustes.host
+        self._porta = porta or self._ajustes.porta
+
+        # Logins já conferidos (só o resumo do cabeçalho, nunca a senha).
+        # Conferir a senha é lento de propósito (veja acesso_web), e o
+        # navegador manda o login a cada pedido, várias vezes por segundo.
+        self._logins_aceitos = set()
 
         self._servidor = None
         self._thread = None
@@ -93,6 +115,46 @@ class ServidorWeb:
 
             self._servidor = None
 
+    def autoriza(self, cabecalho) -> bool:
+        """
+        Confere o cabeçalho "Authorization: Basic ..." de um pedido.
+
+        Chamado pelas threads de atendimento; o conjunto de logins
+        aceitos só cresce, então ler e acrescentar sem trava é seguro.
+        """
+
+        if not self._ajustes.exige_login:
+            return True
+
+        if not cabecalho.startswith("Basic "):
+            return False
+
+        marca = hashlib.sha256(cabecalho.encode("utf-8")).digest()
+
+        if marca in self._logins_aceitos:
+            return True
+
+        try:
+            recebido = base64.b64decode(cabecalho[6:], validate=True).decode("utf-8")
+        except ValueError:
+            return False
+
+        usuario, separador, senha = recebido.partition(":")
+
+        if not separador or usuario != self._ajustes.usuario:
+            return False
+
+        if not acesso_web.senha_confere(senha, self._ajustes.hash_senha):
+            return False
+
+        self._logins_aceitos.add(marca)
+
+        return True
+
+    @property
+    def porta(self) -> int:
+        return self._porta
+
     def endereco(self) -> str:
         """Endereço para abrir o painel no navegador."""
 
@@ -129,6 +191,8 @@ class ServidorWeb:
             # Modo de operação: "catraca" ou "vigilancia". A catraca
             # ESP32 (pelo Wi-Fi) fica fechada na vigilância.
             "modo": modos.modo_valido(estado.modo),
+            # Área (câmera) mostrada: a que comanda a catraca, ou a primeira
+            "area": estado.area,
             "nome_modo": modos.nome_do_modo(estado.modo),
             "titulo": titulos[estado.acesso.value],
             "lugar": textos["lugar"],
@@ -197,10 +261,69 @@ class ServidorWeb:
             ],
         }
 
-    def imagem_ao_vivo(self):
-        """Frame atual em JPEG, com as caixas desenhadas; None sem câmera."""
+    def dados_areas(self) -> list:
+        """
+        Situação de cada área, na ordem das abas do aplicativo.
 
-        frame, estado = self._ler_ao_vivo()
+        É o resumo da visão geral: o detalhe de cada pessoa fica no
+        /api/ao-vivo (da área que comanda a catraca).
+        """
+
+        areas = []
+
+        for indice, (nome, frame, estado, comanda_catraca) in enumerate(self._ler_areas()):
+
+            textos = modos.textos(estado.modo)
+
+            titulos = {
+                "liberado": textos["faixa_ok"],
+                "negado": textos["faixa_irregular"],
+                "analisando": "ANALISANDO",
+                "sem_pessoas": "AGUARDANDO",
+            }
+
+            camera_ativa = frame is not None
+
+            areas.append({
+                "indice": indice,
+                "area": nome,
+                "modo": modos.modo_valido(estado.modo),
+                "nome_modo": modos.nome_do_modo(estado.modo),
+                "camera_ativa": camera_ativa,
+                "acesso": estado.acesso.value if camera_ativa else "camera_desligada",
+                "titulo": titulos[estado.acesso.value] if camera_ativa else "CÂMERA DESLIGADA",
+                "setor": estado.setor,
+                "pessoas": len(estado.pessoas),
+                "irregulares": sum(1 for pessoa in estado.pessoas if pessoa.status is StatusPessoa.NEGADO),
+                "comanda_catraca": bool(comanda_catraca),
+            })
+
+        return areas
+
+    def planilha_csv(self) -> bytes:
+        """O histórico inteiro no formato de exportação (o mesmo do botão "Exportar CSV")."""
+
+        texto = gerar_csv_exportacao(self._auditoria.carregar_historico())
+
+        return texto.encode(config.CODIFICACAO_CSV_EXPORTACAO)
+
+    def imagem_ao_vivo(self, indice_area=None):
+        """
+        Frame atual em JPEG, com as caixas desenhadas; None sem câmera.
+
+        indice_area -> None = a área do "ao vivo" (a que comanda a
+                       catraca); um número = aquela área da lista.
+        """
+
+        if indice_area is None:
+            frame, estado = self._ler_ao_vivo()
+        else:
+            areas = self._ler_areas()
+
+            if not 0 <= indice_area < len(areas):
+                return None
+
+            _, frame, estado, _ = areas[indice_area]
 
         if frame is None:
             return None
@@ -236,6 +359,13 @@ class ServidorWeb:
 
         return self._fonte_ao_vivo()
 
+    def _ler_areas(self):
+
+        if self._fonte_areas is None:
+            return []
+
+        return self._fonte_areas()
+
 
 # ============================================================
 # ATENDIMENTO DOS PEDIDOS
@@ -258,7 +388,9 @@ class _TratadorPainel(BaseHTTPRequestHandler):
             self._pedir_login()
             return
 
-        rota = unquote(urlsplit(self.path).path)
+        partes = urlsplit(self.path)
+
+        rota = unquote(partes.path)
 
         if rota == "/":
             self._enviar(ARQUIVO_PAGINA.read_bytes(), "text/html; charset=utf-8")
@@ -269,9 +401,23 @@ class _TratadorPainel(BaseHTTPRequestHandler):
         elif rota == "/api/historico":
             self._enviar_json(self.painel.dados_historico())
 
+        elif rota == "/api/areas":
+            self._enviar_json(self.painel.dados_areas())
+
+        elif rota == "/exportar.csv":
+
+            nome = f"auditoria_safetech_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"
+
+            # "attachment": o navegador baixa o arquivo em vez de mostrar
+            self._enviar(
+                self.painel.planilha_csv(),
+                "text/csv; charset=utf-8",
+                extras={"Content-Disposition": f'attachment; filename="{nome}"'},
+            )
+
         elif rota == "/ao-vivo.jpg":
 
-            imagem = self.painel.imagem_ao_vivo()
+            imagem = self.painel.imagem_ao_vivo(_numero_da_area(partes.query))
 
             if imagem is None:
                 self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Camera desligada")
@@ -310,23 +456,7 @@ class _TratadorPainel(BaseHTTPRequestHandler):
 
     def _autorizado(self) -> bool:
 
-        if not config.PAINEL_WEB_SENHA:
-            return True
-
-        cabecalho = self.headers.get("Authorization", "")
-
-        if not cabecalho.startswith("Basic "):
-            return False
-
-        try:
-            recebido = base64.b64decode(cabecalho[6:]).decode("utf-8")
-        except ValueError:
-            return False
-
-        esperado = f"{config.PAINEL_WEB_USUARIO}:{config.PAINEL_WEB_SENHA}"
-
-        # compare_digest compara em tempo constante (boa prática para senhas)
-        return hmac.compare_digest(recebido.encode("utf-8"), esperado.encode("utf-8"))
+        return self.painel.autoriza(self.headers.get("Authorization", ""))
 
     def _pedir_login(self):
 
@@ -339,13 +469,17 @@ class _TratadorPainel(BaseHTTPRequestHandler):
     # RESPOSTAS
     # ------------------------------------------------------
 
-    def _enviar(self, corpo, tipo, cache="no-store"):
+    def _enviar(self, corpo, tipo, cache="no-store", extras=None):
 
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", tipo)
         self.send_header("Content-Length", str(len(corpo)))
         self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
+
+        for nome, valor in (extras or {}).items():
+            self.send_header(nome, valor)
+
         self.end_headers()
 
         try:
@@ -369,6 +503,25 @@ class _TratadorPainel(BaseHTTPRequestHandler):
 # ============================================================
 # FUNÇÕES DE APOIO
 # ============================================================
+
+def _numero_da_area(consulta):
+    """
+    Número da área pedido em "?area=N", ou None se não houver.
+
+    Qualquer valor que não seja um número inteiro também vira None (a
+    área do "ao vivo"): o pedido nunca derruba o servidor.
+    """
+
+    valores = parse_qs(consulta).get("area")
+
+    if not valores:
+        return None
+
+    try:
+        return int(valores[0])
+    except ValueError:
+        return None
+
 
 def _totalizar(registros) -> dict:
 

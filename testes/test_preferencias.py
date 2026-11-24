@@ -92,3 +92,37 @@ def test_indice_invalido_e_ignorado(tmp_path):
         preferencias.salvar_fonte_camera(invalido, arquivo)
 
         assert preferencias.carregar_fonte_camera(arquivo) == config.INDICE_CAMERA
+
+
+def test_ajustes_salvos_voltam_ao_abrir(tmp_path):
+
+    arquivo = tmp_path / "preferencias.json"
+
+    preferencias.salvar_ajustes(0.7312, 2.04, arquivo)
+
+    # Arredondados: o controle deslizante dá números com muitas casas
+    assert preferencias.carregar_ajustes(arquivo) == (0.73, 2.0)
+
+
+def test_ajustes_ausentes_ou_fora_da_faixa_usam_o_padrao(tmp_path):
+
+    arquivo = tmp_path / "preferencias.json"
+
+    padrao = (config.LIMIAR_CONFIANCA_PADRAO, config.INTERVALO_CLASSIFICACAO_PADRAO_SEG)
+
+    assert preferencias.carregar_ajustes(arquivo) == padrao
+
+    arquivo.write_text(json.dumps({"limiar_confianca": 7, "intervalo_classificacao": "rapido"}), encoding="utf-8")
+
+    assert preferencias.carregar_ajustes(arquivo) == padrao
+
+
+def test_salvar_ajustes_preserva_o_resto(tmp_path):
+
+    arquivo = tmp_path / "preferencias.json"
+
+    preferencias.salvar("Laboratório", ["oculos"], config.MODO_CATRACA, arquivo)
+    preferencias.salvar_ajustes(0.9, 1.5, arquivo)
+
+    assert preferencias.carregar(arquivo)[0] == "Laboratório"
+

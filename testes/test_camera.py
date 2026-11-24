@@ -149,3 +149,68 @@ def test_trocar_fonte_parada_so_guarda_a_escolha():
     assert camera.fonte == "rtsp://192.168.0.50/stream"
     assert camera.e_camera_ip
     assert camera.estado is EstadoCamera.PARADA
+
+
+# ============================================================
+# WEBCAM QUE PARA DE RESPONDER (cabo USB frouxo)
+# ============================================================
+
+class CapturaFalsa:
+    """Imita o cv2.VideoCapture: entrega 'quadros' frames e depois para de responder."""
+
+    def __init__(self, quadros):
+
+        import numpy as np
+
+        self._restantes = quadros
+        self._frame = np.zeros((48, 64, 3), np.uint8)
+
+    def read(self):
+
+        if self._restantes is not None:
+
+            if self._restantes <= 0:
+                return False, None
+
+            self._restantes -= 1
+
+        return True, self._frame
+
+    def release(self):
+        pass
+
+
+def test_webcam_que_cai_reconecta_sozinha(monkeypatch):
+
+    monkeypatch.setattr(config, "RECONECTAR_WEBCAM", True)
+    monkeypatch.setattr(config, "INTERVALO_RECONEXAO_WEBCAM_SEG", 0.05)
+
+    # 1ª abertura: entrega 5 frames e "cai"; 2ª: fica respondendo
+    aberturas = iter([CapturaFalsa(5), CapturaFalsa(None)])
+
+    camera = Camera(0)
+    monkeypatch.setattr(camera, "_abrir", lambda: next(aberturas))
+
+    camera.iniciar()
+
+    try:
+        # Passa pelo RECONECTANDO e volta a entregar frames sozinha
+        assert esperar(lambda: camera.ler()[1] > 40, 10)
+        assert camera.estado is EstadoCamera.ATIVA
+    finally:
+        camera.parar()
+
+
+def test_webcam_sem_reconexao_vira_erro(monkeypatch):
+
+    monkeypatch.setattr(config, "RECONECTAR_WEBCAM", False)
+
+    camera = Camera(0)
+    monkeypatch.setattr(camera, "_abrir", lambda: CapturaFalsa(5))
+
+    camera.iniciar()
+
+    try:
+        assert esperar(lambda: camera.estado is EstadoCamera.ERRO, 10)
+    finally:
+        camera.parar()

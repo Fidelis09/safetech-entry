@@ -18,9 +18,10 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 from safetech import config
-from safetech.nucleo import anotacao, decisao
+from safetech.nucleo import anotacao, decisao, modos
 from safetech.nucleo.rastreador import RastreadorPessoas
 from safetech.nucleo.tipos import EstadoCena, PessoaObservada, StatusPessoa
 from safetech.servicos import auditoria as modulo_auditoria
@@ -48,6 +49,36 @@ class ParametrosAnalise:
 
     # Modo de operação: config.MODO_CATRACA (acha pelo rosto) ou config.MODO_VIGILANCIA (pelo corpo)
     modo_deteccao: str = config.MODO_DETECCAO_PADRAO
+
+    # Nome da área (câmera) analisada: vai para cada evento da auditoria
+    area: str = config.NOME_AREA_PADRAO
+
+
+# ============================================================
+# CLASSIFICADOR DIVIDIDO ENTRE VÁRIAS ÁREAS
+# ============================================================
+#
+# Com várias câmeras, cada área tem a sua thread de análise, mas o
+# modelo de EPI é carregado UMA vez (ocupa bastante memória e demora
+# para abrir). Esta "capa" deixa só uma thread usá-lo por vez: as outras
+# esperam a vez, em vez de chamarem o modelo ao mesmo tempo.
+# ============================================================
+
+class ClassificadorCompartilhado:
+
+    def __init__(self, classificador):
+
+        self._classificador = classificador
+        self._trava = threading.Lock()
+
+        # O resto do programa lê estes dois como no classificador original
+        self.por_epi = classificador.por_epi
+        self.epis = classificador.epis
+
+    def classificar_lote(self, recortes):
+
+        with self._trava:
+            return self._classificador.classificar_lote(recortes)
 
 
 class Analisador:
@@ -183,7 +214,7 @@ class Analisador:
             if frame is None:
 
                 self._rastreador.limpar()
-                self._publicar(EstadoCena(modo=self._parametros.modo_deteccao))
+                self._publicar(EstadoCena(modo=self._parametros.modo_deteccao, area=self._parametros.area))
 
                 ultimo_numero_frame = -1
 
@@ -387,6 +418,7 @@ class Analisador:
             # O modo em uso de fato (o pedido na tela pode não ter
             # detector carregado: veja _detector_do_modo)
             modo=self._modo_em_uso or self._parametros.modo_deteccao,
+            area=self._parametros.area,
         )
 
     # ============================================================
@@ -446,6 +478,9 @@ class Analisador:
             # frame original é compartilhado com a interface.
             evidencia = anotacao.desenhar_pessoas(frame.copy(), [pessoa], modo=self._modo_em_uso)
 
+            if config.CARIMBAR_EVIDENCIA:
+                anotacao.carimbar(evidencia, self._texto_do_carimbo(rastro.identificador, liberado))
+
             registro = self._auditoria.registrar(
                 evento=evento,
                 identificador_pessoa=rastro.identificador,
@@ -456,11 +491,30 @@ class Analisador:
                 liberado=liberado,
                 imagem_bgr=evidencia,
                 modo=self._modo_em_uso,
+                area=self._parametros.area,
             )
 
             rastro.decisao_registrada = liberado
 
             self.registros_novos.put(registro)
+
+    def _texto_do_carimbo(self, identificador, liberado) -> str:
+        """
+        Texto gravado na foto de evidência, ex.:
+        "SafeTech Entry | 2026-11-24 14:10:32 | Area: Portaria | P003 | Negado"
+        """
+
+        resultado = modos.resultado(self._modo_em_uso, liberado)
+
+        partes = [
+            config.NOME_PRODUTO,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            f"Area: {self._parametros.area}",
+            f"P{identificador:03d}",
+            resultado,
+        ]
+
+        return anotacao.sem_acentos(" | ".join(partes))
 
     # ============================================================
     # 6) PUBLICAÇÃO

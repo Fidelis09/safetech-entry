@@ -1,6 +1,6 @@
 # PROGRESSO — SafeTech Entry
 
-Última atualização: 14/10/2026. Último commit: `3c1261d`. Árvore de trabalho limpa (tudo commitado).
+Última atualização: 24/11/2026. Tudo commitado (o último commit traz as seções 2.15 a 2.18).
 
 Este arquivo descreve **onde o trabalho parou**. Para entender o projeto em si (instalação, uso, arquitetura completa), leia o `README.md`. Para regras permanentes de trabalho no projeto, leia o `CLAUDE.md`.
 
@@ -63,12 +63,12 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 - `modelos/modelo_epis.keras` + `modelos/epis.json` (`["capacete","oculos","colete","luvas"]`).
 - Dataset atual: 49 linhas em `rotulos.csv` (usando: capacete 39, óculos 36, colete 33, luvas 30).
 
-### 2.8 Excluir linha e relatório do momento (28/10, não commitado)
+### 2.8 Excluir linha e relatório do momento (28/10)
 - **Excluir linha** na auditoria (botão ou tecla Delete, com confirmação): a linha sai do log, da tabela e do painel web, mas vai para `auditoria/excluidos/log_excluidos.csv` (com a data da exclusão) e a foto para `auditoria/excluidos/imagens/`. Nada é apagado.
 - **Salvar relatório** na auditoria (age sobre a linha selecionada): grava `auditoria/relatorios/<data do evento>_<pessoa>/` com `relatorio.html` (dados do evento, confiança de cada EPI, foto) e `evidencia.jpg` (cópia), mais os outros eventos do mesmo segundo em `outros/`; abre o HTML no navegador.
 - Testado só com a janela oculta e câmera/detector/classificador falsos; falta conferir na tela real.
 
-### 2.9 Câmera IP (28/10, não commitado)
+### 2.9 Câmera IP (28/10)
 - A câmera aceita um número (webcam) ou um endereço `rtsp://` / `http://` (câmera IP, aberta pelo FFMPEG do OpenCV). Tempo limite de conexão/leitura e RTSP por TCP em `config.py`.
 - Quando a rede cai, o estado vira `RECONECTANDO` e a câmera tenta voltar sozinha; endereço errado na primeira conexão vira `ERRO`.
 - Na tela: item "+ Adicionar câmera IP..." na lista de câmeras abre `safetech/interface/dialogo_camera_ip.py` (nome, endereço, usuário, senha). Botão "Remover" aparece ao lado da lista quando a câmera em uso é IP.
@@ -81,25 +81,71 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 - `requirements.txt` com versões fixas; `requirements-dev.txt` (pytest); `.github/workflows/testes.yml` roda os testes em Windows a cada push (sem TensorFlow).
 - README: corrigidos os dois trechos que diziam que o repositório só trazia o modelo antigo; novas seções de câmera IP, relatório, excluir linha e testes.
 
-### 2.11 Catraca de demonstração com ESP32 (30/10, não commitado)
+### 2.11 Catraca de demonstração com ESP32 (30/10)
 - Pasta `catraca_esp32/`: `catraca_esp32.ino`, `config_exemplo.h` (copiar para `config.h`, que fica fora do git) e `LEIA-ME.md` (peças, ligações, instalação, roteiro da apresentação, problemas comuns).
 - O ESP32 lê `/api/ao-vivo` a cada 500 ms com o login do painel; servo (cancela), LEDs verde/amarelo/vermelho, buzzer ativo, OLED SSD1306 e relé (pulso ao abrir). Na dúvida, fecha: falha de rede, programa fechado ou status desconhecido mantêm a cancela fechada.
 - `testes/test_contrato_catraca.py` garante os campos de que a catraca depende. Testes do painel passaram a usar 127.0.0.1 (no Windows, "localhost" perdia ~2 s por pedido): suíte caiu de 35 s para 16 s.
 - **Não compilado**: não há Arduino IDE nem compilador neste computador. Falta compilar, gravar e montar.
 
-### 2.12 Catraca pelo cabo USB, junto com o Wi-Fi (04/11, não commitado)
+### 2.12 Catraca pelo cabo USB, junto com o Wi-Fi (04/11)
 - `safetech/servicos/catraca_serial.py`: thread que escreve `ST|acesso|negadas|total|faltando` na porta serial a cada 0,3 s. Acha o ESP32 sozinho (chips CP210x/CH340/Espressif/FTDI) e reconecta se o cabo sair; abre a porta com DTR/RTS desligados para não reiniciar a placa. Ajustes em `config.py` (`CATRACA_*`). A janela mostra "Catraca: COM3 conectada" no rodapé. `pyserial==3.5` entrou no `requirements.txt`.
 - Firmware: aceita cabo e Wi-Fi juntos. Cabo tem prioridade; Wi-Fi só é consultado se `WIFI_ATIVO true` e o cabo não estiver mandando. `WIFI_ATIVO false` por enquanto (o Wi-Fi do dia da apresentação ainda não foi escolhido). Sem dados por 3 s ou "liberado" velho (1,5 s) fecha a cancela.
 - Testado no ESP32 real (COM3): todas as situações, lixo no cabo ignorado, silêncio vai para OFFLINE, e o `CatracaSerial` real. Falta testar o conjunto com o SafeTech completo aberto (câmera + IA) e o Wi-Fi.
 - Testes: 85 passam (`test_catraca_serial.py` novo; `conftest.py` desliga o envio nos testes).
 - O Arduino IDE tem `arduino-cli` embutido: placa ESP32 e bibliotecas já instaladas; firmware gravado com ele.
 
-### 2.13 Modos Catraca e Vigilância (04/11, não commitado)
+### 2.13 Modos Catraca e Vigilância (04/11)
 - Os modos "Rosto"/"Corpo" viraram **Catraca** (rosto; libera/nega; catraca física obedece) e **Vigilância** (corpo; só verifica conformidade e registra; catraca física desligada). Chaves `catraca`/`vigilancia` em `config.py`; `"rosto"`/`"corpo"` salvos antes são convertidos.
 - Textos de cada modo em `config.TEXTOS_POR_MODO` e `safetech/nucleo/modos.py`. Faixa de status, palavra no vídeo, tabela de auditoria (nova coluna Modo; indicadores "Conformes/Irregulares/Conformidade"), relatório e painel web mostram o texto do modo.
 - Auditoria ganhou a coluna `modo`. Log antigo é convertido (eventos viram `catraca`) e o original fica guardado como `_formato_antigo_`.
 - Catraca: o programa envia `ST|vigilancia|...` pelo cabo e `"modo"` no `/api/ao-vivo`; o firmware tem a situação VIGILANCIA (fechada, LEDs apagados, tela "VIGILANCIA / Catraca desligada"). Gravado e testado no ESP32 real.
 - Testes: 103 (novo `test_modos.py`). Uma vez o Tk falhou ao ler o `init.tcl` (instabilidade do Python da Store); nas rodadas seguintes passou.
+
+### 2.14 Janela de Configurações e painel principal enxuto (04/11)
+- Botão **Configurações** abre `safetech/interface/janela_configuracoes.py`: abas Câmera (lista, adicionar/remover IP), Análise (confiança e intervalo, com "Voltar aos valores padrão"), Fiscalização (setor e EPIs um por um) e Coleta de imagens. Criada uma vez, escondida; fechar só esconde.
+- Painel principal ficou com vídeo, faixa de status e uma barra com Setor, Modo e botão da câmera.
+- Confiança e intervalo agora ficam salvos (`preferencias.carregar_ajustes/salvar_ajustes`, gravação adiada `ESPERA_SALVAR_AJUSTES_MS`). Faixas dos controles em `config.py`. Estilo das abas no `tema.py`.
+- Testes: 113. A nova tentativa de abrir o Tk nos testes cobre também a falha com `auto.tcl`.
+- Falta: conferir o visual na tela real (os testes não mostram janelas).
+
+### 2.15 Várias áreas (câmeras) em abas e EPIs de volta na tela (04/11)
+- Cada **área** é uma aba à esquerda (câmera, setor, modo, EPIs exigidos e análise próprios); aba "+ Nova área" cria outra; renomear/remover/trocar câmera/"comanda a catraca" em Configurações > Área e câmera. Limite `MAXIMO_AREAS` = 6.
+- EPIs exigidos voltaram para a tela principal (na aba da área); a aba Fiscalização saiu das Configurações.
+- Auditoria única com coluna `area` (log anterior convertido para "Principal", original guardado). Relatório e painel web mostram a área. A catraca e o "ao vivo" do painel web seguem a área marcada.
+- Novos arquivos: `interface/area_monitorada.py`, `interface/dialogo_area.py`. `ClassificadorCompartilhado` em `servicos/analisador.py`.
+- Testes: 130 (novo `test_areas.py`; `conftest.py` zera as preferências a cada teste e recolhe sobras do Tk na thread principal).
+- Falta: ver na tela real e testar com duas câmeras de verdade ao mesmo tempo (desempenho).
+
+### 2.16 Revisão de profissionalismo: visual, câmeras e funções (24/11)
+- **Cabeçalho novo**: ícone (escudo desenhado em `tema.desenhar_icone`, também na barra de tarefas), nome, frase, **selos** com ponto colorido (IA, painel web, catraca; `interface/componentes.py`) e relógio. O rodapé ficou só com avisos e atalhos.
+- **Vídeo**: legendas sobre a imagem ("● AO VIVO" piscando, área, data/hora; resolução real, fps, análises/s, pessoas), no lugar da linha de desempenho. Faixa de status com símbolo (✔ ✖ ◔ ●) e detalhe que quebra a linha. Palavra das caixas maior (`ESCALA_FONTE_ROTULO`).
+- **Visão geral** (`interface/painel_visao_geral.py`): botão ao lado de Configurações, com 2+ áreas; quadros com a situação colorida, grade que se adapta ao formato do painel, redesenho a `QUADROS_POR_SEGUNDO_VISAO_GERAL`. Clique abre a aba.
+- **Auditoria**: filtro de **período** (cartões, tabela e exportação o seguem), **Exportar CSV** (`auditoria.exportar_csv`, `;` + BOM para o Excel), listras na tabela, mensagem de tabela vazia, filete colorido nos cartões. Salvar relatório e Excluir foram para o cartão "Evento selecionado".
+- **Fotos de evidência carimbadas** (`anotacao.carimbar`; `CARIMBAR_EVIDENCIA`).
+- **Webcam reconecta sozinha** (`RECONECTAR_WEBCAM`, `INTERVALO_RECONEXAO_WEBCAM_SEG`).
+- **Bipe** do Windows em acesso negado, só no modo catraca (`ALERTA_SONORO_NEGADO`; desligado nos testes).
+- **F11** tela cheia; Esc sai.
+- **Painel web**: logo e relógio, seção **Áreas** (`/api/areas`, `/ao-vivo.jpg?area=N`), **Exportar CSV** (`/exportar.csv`, GET), selo "AO VIVO", filetes nos cartões, listras e símbolos na faixa. `/api/ao-vivo` (contrato do ESP32) não mudou.
+- Testes: 152 (novo `test_exportacao.py`; acréscimos em `test_janela.py`, `test_painel_web.py`, `test_camera.py`).
+- Conferido por captura de tela com câmera/IA falsas e o painel web no navegador com dados falsos. Falta: ver com câmera e modelo reais, e ouvir o bipe.
+
+### 2.17 Página da câmera redesenhada e temas claro/escuro (24/11)
+- **Navegação por pílulas** (`componentes.BarraAreas`) no lugar das abas: "▦ Visão geral", uma pílula por área com ponto na cor da situação (atualizado 2x/s) e "+ Nova área". O Notebook continua guardando as páginas, com as abas escondidas (`SemAbas.TNotebook`), então os testes que leem o texto das abas seguem valendo.
+- **Página da área** (`painel_monitoramento.py` reescrito): cabeçalho da câmera (nome da câmera, "comanda a catraca", **Trocar câmera** que abre Configurações na área, **Capturar foto**, **▶ Iniciar / ■ Parar**); **tela de espera** com ícone, título, explicação e botão de ligar no meio; faixa de status cheia só para liberado/negado/analisando (as outras viram cartão com filete); **EPIs como chips** (✓ quando exigido).
+- **Capturar foto** (`servicos/capturas.py`, `config.PASTA_CAPTURAS` = `auditoria/capturas`): frame com caixas e carimbo, fora do log.
+- **Visão geral**: clique abre a área (e a pílula volta), destaque ao passar o mouse com "Abrir ›", botão **Ligar câmera** no quadro desligado.
+- **Temas escuro e claro** no programa: `tema.PALETAS`, `trocar_tema` (estilos + repintura de todos os componentes tk e desenhos de Canvas), botão no cabeçalho, salvo em `preferencias.json` (`tema`), aplicado antes de montar a tela. Chaves novas `realce`, `desativado`, `texto_legenda`.
+- **Painel web**: variáveis CSS do tema claro, botão "Tema claro/escuro" (localStorage, com try/catch), sem escolha segue o sistema.
+- **Auditoria por área**: com uma área aberta, a auditoria (cartões, tabela, exportação) mostra só os eventos dela, com o nome no título; na Visão geral, todos. `PainelAuditoria.definir_area`, chamado por `_selecionar_area` e pela visão geral. Renomear a área passa a mostrar os eventos do nome novo (os antigos ficam com o nome antigo no log).
+- Testes: 169 (novo `test_temas.py`; mais testes de barra, tela de espera, chips e captura em `test_janela.py`). Conferido por captura de tela (PrintWindow, os dois temas e a troca ao vivo) e no navegador. Falta: ver com câmera real.
+
+### 2.18 Painel web ajustado nas Configurações (24/11)
+- Aba **Configurações > Painel web**: ligar, acesso pela rede ou só neste computador, porta, exigir login, usuário, nova senha + confirmação, "Mostrar senha", **Aplicar** (reinicia o servidor na hora e mostra o resultado, ex.: porta em uso), **Abrir no navegador**, aviso de senha padrão / sem senha, lembrete do `config.h` da catraca.
+- `servicos/acesso_web.py`: `AjustesPainelWeb`, hash **PBKDF2-SHA256 com sal** (`ITERACOES_HASH_SENHA`), `senha_confere`, `montar_ajustes` (porta 1024–65535, usuário sem ":", senha mínima `PAINEL_WEB_SENHA_MINIMA`, confirmação, em branco mantém a atual). Salvo em `preferencias.json` (`painel_web`), nunca a senha em texto.
+- Servidor (`ServidorWeb(ajustes=...)`) confere o login pelo hash e guarda os logins já aceitos (só o resumo do cabeçalho). `painel_web.py` usa os mesmos ajustes.
+- Selo do cabeçalho: amarelo com senha padrão ou sem senha; "Painel web desligado" leva às Configurações.
+- Isso resolve a pendência da senha padrão pública: basta trocar pela tela antes de publicar/usar. `config.h` da catraca (Wi-Fi) precisa ser atualizado à mão se mudar usuário/senha/porta.
+- Testes: 195 (novo `test_acesso_web.py`). Conferido por captura de tela da aba nos dois temas.
 
 ---
 

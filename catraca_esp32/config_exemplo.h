@@ -63,12 +63,13 @@
 // O endereço aparece no rodapé da janela do programa, por exemplo
 // "Painel web: http://192.168.0.15:8080". Copie só o IP e a porta.
 //
-// No config.py do programa, PAINEL_WEB_HOST precisa ser "0.0.0.0"
-// (o padrão), senão o painel só aceita o próprio computador.
+// No programa, em Configurações > Painel web, "Permitir acesso pela
+// rede" precisa estar marcado, senão o painel só aceita o próprio
+// computador.
 //
-// Usuário e senha: os mesmos do painel web (PAINEL_WEB_USUARIO e
-// PAINEL_WEB_SENHA no config.py). A catraca só LÊ o status, pelo
-// mesmo caminho que o navegador do gerente usa.
+// Usuário, senha e porta: os mesmos do painel web (Configurações >
+// Painel web). Trocou lá, troque aqui também. A catraca só LÊ o
+// status, pelo mesmo caminho que o navegador do gerente usa.
 // ============================================================
 
 #define SAFETECH_IP       "192.168.0.15"

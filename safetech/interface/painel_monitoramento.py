@@ -1,14 +1,24 @@
 """
-Painel de monitoramento (lado esquerdo da janela).
+Painel de monitoramento de UMA área (a página de cada área à esquerda).
 
-Mostra o vídeo da webcam, a faixa de status do acesso e três cartões:
+De cima para baixo, na ordem em que o operador usa:
 
-    Fiscalização -> qual setor está sendo fiscalizado e quais EPIs ele exige
-    Ajustes      -> limiar de confiança, intervalo de análise e botão da câmera
-    Coleta       -> salva imagens rotuladas para treinar o modelo
+    1) CABEÇALHO DA CÂMERA -> qual câmera é, se comanda a catraca, e os
+                              botões: ligar/desligar, capturar foto e
+                              trocar a câmera;
+    2) VÍDEO               -> a imagem com as caixas e as legendas "ao
+                              vivo". Sem vídeo, uma tela de espera com
+                              ícone, explicação e o botão de ligar no meio;
+    3) FAIXA DE STATUS     -> liberado / negado (cheia de cor, para ser
+                              vista de longe) ou aguardando / câmera
+                              desligada (discreta, num cartão);
+    4) FISCALIZAÇÃO        -> setor, modo (catraca ou vigilância) e os
+                              EPIs exigidos, como "chips" que se ligam e
+                              desligam com um clique.
 
-O painel só exibe e avisa: as ações de verdade (ligar câmera, salvar
-imagem, mudar parâmetros) são funções recebidas da janela principal.
+O painel só exibe e avisa: as ações de verdade (ligar câmera, mudar o
+setor, o modo ou os EPIs, capturar a foto) são funções recebidas da
+janela principal.
 """
 
 import tkinter as tk
@@ -19,11 +29,28 @@ from safetech.interface.tema import CORES, FONTES
 from safetech.nucleo.epis import nome_do_epi
 
 
-# Último item da lista de câmeras: não é uma câmera, é a ação de
-# cadastrar uma nova. Um objeto próprio, para nunca ser confundido
-# com o número de uma webcam ou com um endereço.
-OPCAO_ADICIONAR_IP = object()
-TEXTO_ADICIONAR_IP = "+ Adicionar câmera IP..."
+# Distância (px) entre as legendas sobre o vídeo e a borda dele
+MARGEM_LEGENDA = 10
+
+# Situações "fortes" da faixa: ela fica cheia de cor (verde, vermelho,
+# amarelo) com texto branco. As outras (aguardando, câmera desligada,
+# carregando) ficam num cartão discreto, com um filete colorido.
+CHAVES_DE_COR_FORTE = ("sucesso", "perigo", "alerta")
+
+
+def icone_da_cor(cor) -> str:
+    """
+    Símbolo à esquerda da faixa, escolhido pela cor dela (cada cor já é
+    uma situação). Repete a informação da cor para quem não distingue cores.
+    """
+
+    simbolos = {
+        CORES["sucesso"]: "✔",   # ✔
+        CORES["perigo"]: "✖",    # ✖
+        CORES["alerta"]: "◔",    # ◔
+    }
+
+    return simbolos.get(cor, "●")   # ●
 
 
 class PainelMonitoramento(ttk.Frame):
@@ -34,78 +61,41 @@ class PainelMonitoramento(ttk.Frame):
         epis_do_modelo,
         modos_disponiveis,
         modo_inicial,
-        ao_mudar_modo,
         setor_inicial,
         exigidos_iniciais,
-        limiar_inicial,
-        intervalo_inicial,
-        ao_alternar_camera,
-        ao_salvar_imagem,
-        ao_enviar_arquivos,
-        ao_mudar_parametros,
+        ao_mudar_modo,
+        ao_escolher_setor,
         ao_mudar_fiscalizacao,
-        fonte_camera_inicial,
-        cameras_ip_iniciais,
-        ao_escolher_camera,
-        ao_adicionar_camera_ip,
-        ao_remover_camera_ip,
+        ao_alternar_camera,
+        ao_capturar_foto=None,
+        ao_trocar_camera=None,
     ):
         """
-        epis_do_modelo    -> chaves dos EPIs que o modelo instalado reconhece.
-                             Só eles podem ser exigidos (não dá para
-                             fiscalizar o que o modelo não sabe ver).
-        modos_disponiveis -> modos de detecção (rosto / corpo) cujo modelo
-                             está instalado. Os outros ficam desativados.
-        fonte_camera_inicial -> câmera em uso: número (webcam) ou
-                             endereço (câmera IP).
-        cameras_ip_iniciais -> câmeras IP cadastradas: lista de (nome, endereço).
+        epis_do_modelo        -> EPIs que o modelo reconhece: só eles podem
+                                 ser exigidos. Sem nenhum (modelo antigo),
+                                 a fiscalização fica desativada.
+        modos_disponiveis     -> modos cujo detector está instalado.
+        ao_mudar_modo         -> chamado com o modo escolhido.
+        ao_escolher_setor     -> chamado com o nome do setor escolhido.
+        ao_mudar_fiscalizacao -> chamado com (setor, exigidos) ao marcar
+                                 ou desmarcar um EPI à mão.
+        ao_alternar_camera    -> liga ou desliga a câmera da área.
+        ao_capturar_foto      -> botão "Capturar foto" (sem argumentos).
+        ao_trocar_camera      -> botão "Trocar câmera" (abre as Configurações).
         """
 
-        super().__init__(pai, style="Painel.TFrame", padding=18)
+        super().__init__(pai, style="Painel.TFrame", padding=(0, 8, 0, 0))
 
         self._epis_do_modelo = set(epis_do_modelo)
-
         self._modos_disponiveis = set(modos_disponiveis)
+
         self._ao_mudar_modo = ao_mudar_modo
-
-        # Modo de operação selecionado (catraca ou vigilância)
-        self._modo = tk.StringVar(value=modo_inicial)
-
-        self._ao_salvar_imagem = ao_salvar_imagem
-        self._ao_enviar_arquivos = ao_enviar_arquivos
-        self._ao_mudar_parametros = ao_mudar_parametros
+        self._ao_escolher_setor = ao_escolher_setor
         self._ao_mudar_fiscalizacao = ao_mudar_fiscalizacao
+        self._ao_alternar_camera = ao_alternar_camera
 
-        # Câmeras: as webcams são achadas por uma busca em segundo
-        # plano (até ela terminar, só aparece a câmera em uso); as
-        # câmeras IP vêm das preferências.
-        self._ao_escolher_camera = ao_escolher_camera
-        self._ao_adicionar_camera_ip = ao_adicionar_camera_ip
-        self._ao_remover_camera_ip = ao_remover_camera_ip
-
-        self._fonte_camera = fonte_camera_inicial
-        self._webcams = []
-
-        # Última webcam usada: fica sempre na lista, para dar para
-        # voltar a ela mesmo antes de a busca terminar (ou se a busca
-        # não achar nenhuma).
-        if isinstance(fonte_camera_inicial, int):
-            self._webcam_lembrada = fonte_camera_inicial
-        else:
-            self._webcam_lembrada = config.INDICE_CAMERA
-        self._cameras_ip = list(cameras_ip_iniciais)
-
-        # Fonte de cada item da lista, na mesma ordem dos textos
-        # (o último item é a opção "Adicionar câmera IP...")
-        self._fontes_da_lista = []
-
-        self._nome_da_camera = tk.StringVar()
-
-        # Variáveis ligadas aos controles deslizantes
-        self._limiar = tk.DoubleVar(value=limiar_inicial * 100)
-        self._intervalo = tk.DoubleVar(value=intervalo_inicial)
-
-        # Fiscalização: setor escolhido e uma caixa de seleção por EPI
+        # Fiscalização da área: modo, setor e um "chip" por EPI
+        self._modo = tk.StringVar(value=modo_inicial)
         self._setor = tk.StringVar(value=setor_inicial)
 
         self._exigir = {
@@ -113,8 +103,7 @@ class PainelMonitoramento(ttk.Frame):
             for chave in config.EPIS
         }
 
-        # Coleta: o que a pessoa na câmera está usando (rótulos da imagem)
-        self._usando = {chave: tk.BooleanVar(value=False) for chave in config.EPIS}
+        self._chips = {}
 
         # Referência à imagem em exibição (sem ela o Tkinter apaga a imagem)
         self._imagem_video = None
@@ -124,67 +113,69 @@ class PainelMonitoramento(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        self._montar_cabecalho()
+        self._montar_cabecalho(ao_capturar_foto, ao_trocar_camera)
         self._montar_video()
         self._montar_status()
-        self._montar_fiscalizacao()
-        self._montar_ajustes(ao_alternar_camera)
-        self._montar_coleta()
+        self._montar_controles()
 
     # ============================================================
     # MONTAGEM
     # ============================================================
 
-    def _montar_cabecalho(self):
+    def _montar_cabecalho(self, ao_capturar_foto, ao_trocar_camera):
+        """Qual câmera é, se comanda a catraca, e os botões da câmera."""
 
-        cabecalho = ttk.Frame(self, style="Painel.TFrame")
-        cabecalho.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        cabeca = ttk.Frame(self, style="Painel.TFrame")
+        cabeca.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
-        ttk.Label(
-            cabecalho, text="Monitoramento", style="Titulo.Painel.TLabel"
-        ).pack(side="left")
-
-        # Escolha da câmera, logo acima do vídeo. "readonly": só dá
-        # para escolher da lista de câmeras encontradas.
-        ttk.Label(cabecalho, text="Câmera", style="Suave.Painel.TLabel").pack(side="left", padx=(20, 0))
-
-        self._caixa_camera = ttk.Combobox(
-            cabecalho,
-            textvariable=self._nome_da_camera,
-            state="readonly",
-            width=22,
+        # O botão principal vai primeiro (à direita) para nunca ser cortado
+        self._botao_camera = ttk.Button(
+            cabeca,
+            text="Carregando...",
+            style="Primario.TButton",
+            command=self._ao_alternar_camera,
             takefocus=False,
+            width=15,
+            state="disabled",
         )
-        self._caixa_camera.pack(side="left", padx=(8, 0))
-        self._caixa_camera.bind("<<ComboboxSelected>>", self._ao_escolher_camera_na_lista)
+        self._botao_camera.pack(side="right")
 
-        # Remove a câmera IP selecionada da lista. Só aparece quando
-        # a câmera em uso é uma câmera IP (webcam não se remove).
-        self._botao_remover_ip = ttk.Button(
-            cabecalho,
-            text="Remover",
-            style="Pequeno.Perigo.TButton",
-            command=lambda: self._ao_remover_camera_ip(self._fonte_camera),
+        # Guarda o momento (imagem com caixas e carimbo) fora do log
+        self._botao_foto = ttk.Button(
+            cabeca,
+            text="Capturar foto",
+            style="Secundario.TButton",
+            command=ao_capturar_foto or (lambda: None),
             takefocus=False,
+            state="disabled",
         )
+        self._botao_foto.pack(side="right", padx=(0, 8))
 
-        self._atualizar_lista_cameras()
+        ttk.Button(
+            cabeca,
+            text="Trocar câmera",
+            style="Secundario.TButton",
+            command=ao_trocar_camera or (lambda: None),
+            takefocus=False,
+        ).pack(side="right", padx=(0, 8))
 
-        # Indicadores de desempenho (câmera / análise), à direita
-        self._rotulo_desempenho = ttk.Label(
-            cabecalho, text="", style="Suave.Painel.TLabel"
-        )
-        self._rotulo_desempenho.pack(side="right")
+        # À esquerda: qual câmera esta área usa (webcam N ou o nome da
+        # câmera IP; nunca o endereço, que pode ter a senha). Quem comanda
+        # a catraca já aparece na barra de áreas ("· catraca").
+        self._rotulo_camera = ttk.Label(cabeca, text="", style="Painel.TLabel", font=FONTES["texto_negrito"])
+        self._rotulo_camera.pack(side="left")
+
+        self._rotulo_catraca = ttk.Label(cabeca, text="", style="Suave.Painel.TLabel")
+        self._rotulo_catraca.pack(side="left", padx=(8, 0))
 
     def _montar_video(self):
 
-        # Canvas em vez de Label: permite centralizar a imagem e
-        # escrever uma mensagem quando não há vídeo.
+        # Canvas em vez de Label: permite centralizar a imagem, desenhar
+        # a tela de espera e pôr legendas por cima do vídeo.
         self._tela = tk.Canvas(
             self,
-            bg="#000000",
-            highlightthickness=1,
-            highlightbackground=CORES["borda"],
+            bg=CORES["video"],
+            highlightthickness=0,
             width=320,
             height=200,
         )
@@ -192,61 +183,133 @@ class PainelMonitoramento(ttk.Frame):
 
         self._item_imagem = self._tela.create_image(0, 0, anchor="center")
 
+        # ------------------------------------------------------
+        # TELA DE ESPERA (sem vídeo): ícone, título, detalhe e botão
+        # ------------------------------------------------------
+
+        cor_icone = CORES["texto_suave"]
+
+        # Ícone de câmera: corpo, visor em cima e a lente redonda
+        self._icone_espera = [
+            self._tela.create_rectangle(0, 0, 0, 0, outline=cor_icone, width=3),
+            self._tela.create_rectangle(0, 0, 0, 0, outline=cor_icone, width=3),
+            self._tela.create_oval(0, 0, 0, 0, outline=cor_icone, width=3),
+        ]
+
         self._item_mensagem = self._tela.create_text(
-            0,
-            0,
-            text="",
-            fill=CORES["texto_suave"],
-            font=FONTES["titulo"],
-            justify="center",
+            0, 0, text="", fill=CORES["texto"], font=FONTES["titulo"], justify="center", anchor="n"
         )
 
-        # Mantém imagem e mensagem no centro quando o painel muda de tamanho
+        self._item_detalhe = self._tela.create_text(
+            0, 0, text="", fill=CORES["texto_suave"], font=FONTES["texto"], justify="center", anchor="n"
+        )
+
+        # Botão no meio da tela de espera: o caminho mais curto para ligar
+        self._botao_espera = ttk.Button(
+            self._tela,
+            text="",
+            style="Primario.TButton",
+            command=self._ao_alternar_camera,
+            takefocus=False,
+        )
+
+        self._item_botao_espera = self._tela.create_window(0, 0, window=self._botao_espera, anchor="n", state="hidden")
+
+        # ------------------------------------------------------
+        # LEGENDAS SOBRE O VÍDEO (como num monitor de segurança)
+        # ------------------------------------------------------
+        #
+        #   à esquerda -> ● AO VIVO, nome da área, data e hora
+        #   à direita  -> resolução, quadros por segundo, análises e pessoas
+        #
+        # Cada legenda é um texto sobre um retângulo escuro, para ser
+        # lida em cima de qualquer imagem. Ficam escondidas sem vídeo.
+
+        self._legendas = {}
+
+        for lado, ancora in (("esquerda", "nw"), ("direita", "ne")):
+
+            fundo = self._tela.create_rectangle(0, 0, 0, 0, fill=CORES["legenda_video"], outline="", state="hidden")
+
+            texto = self._tela.create_text(
+                0, 0, text="", anchor=ancora, fill=CORES["texto_legenda"], font=FONTES["legenda_video"], state="hidden"
+            )
+
+            self._legendas[lado] = (fundo, texto)
+
+        # Ponto vermelho do "AO VIVO" (pisca uma vez por segundo)
+        self._ponto_ao_vivo = self._tela.create_oval(0, 0, 0, 0, fill=CORES["perigo"], outline="", state="hidden")
+
+        # Mantém tudo no lugar quando o painel muda de tamanho
         self._tela.bind("<Configure>", self._ao_redimensionar_tela)
 
     def _montar_status(self):
 
-        self._faixa_status = tk.Frame(self, bg=CORES["neutro"], padx=18, pady=10)
-        self._faixa_status.grid(row=2, column=0, sticky="ew", pady=10)
+        self._faixa_status = tk.Frame(self, bg=CORES["cartao"])
+        self._faixa_status.grid(row=2, column=0, sticky="ew", pady=(8, 8))
+
+        self._faixa_status.columnconfigure(2, weight=1)
+
+        # Filete colorido à esquerda (aparece nas situações discretas)
+        self._filete_status = tk.Frame(self._faixa_status, bg=CORES["borda"], width=4)
+        self._filete_status.grid(row=0, column=0, rowspan=2, sticky="ns")
+
+        # Símbolo da situação (✔ ✖ ◔ ●), à esquerda dos textos
+        self._icone_status = tk.Label(
+            self._faixa_status,
+            text=icone_da_cor(None),
+            font=FONTES["status_icone"],
+            bg=CORES["cartao"],
+            fg=CORES["texto_suave"],
+            width=2,
+        )
+        self._icone_status.grid(row=0, column=1, rowspan=2, sticky="w", padx=(12, 10), pady=8)
 
         self._rotulo_status = tk.Label(
             self._faixa_status,
             text="",
             font=FONTES["status_titulo"],
-            bg=CORES["neutro"],
-            fg="white",
+            bg=CORES["cartao"],
+            fg=CORES["texto"],
             anchor="w",
         )
-        self._rotulo_status.pack(fill="x")
+        self._rotulo_status.grid(row=0, column=2, sticky="ew", padx=(0, 16), pady=(8, 0))
 
         self._rotulo_detalhe = tk.Label(
             self._faixa_status,
             text="",
             font=FONTES["status_detalhe"],
-            bg=CORES["neutro"],
-            fg="white",
+            bg=CORES["cartao"],
+            fg=CORES["texto_suave"],
             anchor="w",
             justify="left",
         )
-        self._rotulo_detalhe.pack(fill="x")
+        self._rotulo_detalhe.grid(row=1, column=2, sticky="ew", padx=(0, 16), pady=(0, 10))
+
+        # O detalhe quebra a linha na largura da faixa (sem isso, um
+        # texto comprido é cortado na borda da janela)
+        self._rotulo_detalhe.bind(
+            "<Configure>",
+            lambda evento: self._rotulo_detalhe.config(wraplength=max(100, evento.width - 4)),
+        )
 
     # ------------------------------------------------------
-    # CARTÃO: FISCALIZAÇÃO (setor e EPIs exigidos)
+    # FISCALIZAÇÃO: setor, modo e EPIs exigidos
     # ------------------------------------------------------
 
-    def _montar_fiscalizacao(self):
+    def _montar_controles(self):
 
         cartao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 10))
         cartao.grid(row=3, column=0, sticky="ew")
 
+        cartao.columnconfigure(1, weight=1)
+
+        # ---------------- linha 1: setor e modo ----------------
+
+        ttk.Label(cartao, text="Setor", style="Suave.Cartao.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
+
         linha = ttk.Frame(cartao, style="Cartao.TFrame")
-        linha.pack(fill="x")
-
-        ttk.Label(
-            linha, text="Fiscalização", style="Cartao.TLabel", font=FONTES["texto_negrito"]
-        ).pack(side="left")
-
-        ttk.Label(linha, text="Setor", style="Suave.Cartao.TLabel").pack(side="left", padx=(16, 6))
+        linha.grid(row=0, column=1, sticky="ew")
 
         # Lista de setores prontos. "readonly": só dá para escolher da lista
         self._caixa_setor = ttk.Combobox(
@@ -254,24 +317,22 @@ class PainelMonitoramento(ttk.Frame):
             textvariable=self._setor,
             values=list(config.SETORES),
             state="readonly",
-            width=21,
+            width=20,
             takefocus=False,
         )
         self._caixa_setor.pack(side="left")
-        self._caixa_setor.bind("<<ComboboxSelected>>", self._ao_escolher_setor)
+        self._caixa_setor.bind("<<ComboboxSelected>>", self._ao_escolher_setor_na_lista)
 
-        # --------------------------------------------------
-        # SELETOR DO MODO DE OPERAÇÃO (catraca / vigilância)
-        # --------------------------------------------------
-        #
-        # Botões lado a lado em que só um fica marcado. Montados da
-        # direita para a esquerda, porque são alinhados à direita.
-        # --------------------------------------------------
+        # Modo à direita: botões lado a lado em que só um fica marcado
+        grupo_modo = ttk.Frame(linha, style="Cartao.TFrame")
+        grupo_modo.pack(side="right")
 
-        for modo, nome in reversed(list(config.MODOS_DETECCAO.items())):
+        ttk.Label(grupo_modo, text="Modo", style="Suave.Cartao.TLabel").pack(side="left", padx=(12, 8))
+
+        for modo, nome in config.MODOS_DETECCAO.items():
 
             botao = ttk.Radiobutton(
-                linha,
+                grupo_modo,
                 text=nome,
                 value=modo,
                 variable=self._modo,
@@ -279,307 +340,162 @@ class PainelMonitoramento(ttk.Frame):
                 command=lambda: self._ao_mudar_modo(self._modo.get()),
                 takefocus=False,
             )
-            botao.pack(side="right", padx=(2, 0))
+            botao.pack(side="left", padx=(0, 2))
 
-            # Modo cujo modelo não foi baixado não pode ser escolhido
+            # Modo cujo detector não foi baixado não pode ser escolhido
             if modo not in self._modos_disponiveis:
                 botao.state(["disabled"])
 
-        ttk.Label(linha, text="Modo", style="Suave.Cartao.TLabel").pack(side="right", padx=(0, 6))
+        # ---------------- linha 2: EPIs exigidos ----------------
+        #
+        # O sistema continua enxergando todos os EPIs: ligar um chip só
+        # define quais contam para liberar (ou estar em conformidade).
 
-        # Os EPIs ficam numa segunda linha, para caberem mesmo com a
-        # janela estreita (ou com mais equipamentos cadastrados)
+        ttk.Label(cartao, text="Exige", style="Suave.Cartao.TLabel").grid(
+            row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 0)
+        )
+
         linha_epis = ttk.Frame(cartao, style="Cartao.TFrame")
-        linha_epis.pack(fill="x", pady=(8, 0))
-
-        ttk.Label(linha_epis, text="EPIs exigidos", style="Suave.Cartao.TLabel").pack(side="left")
+        linha_epis.grid(row=1, column=1, sticky="w", pady=(10, 0))
 
         for chave in config.EPIS:
 
-            caixa = ttk.Checkbutton(
+            chip = ttk.Checkbutton(
                 linha_epis,
                 text=nome_do_epi(chave),
                 variable=self._exigir[chave],
-                style="Cartao.TCheckbutton",
+                style="Chip.Toolbutton",
                 command=self._ao_marcar_exigido,
                 takefocus=False,
             )
-            caixa.pack(side="left", padx=(12, 0))
+            chip.pack(side="left", padx=(0, 6))
+
+            self._chips[chave] = chip
 
             # EPI que o modelo não reconhece não pode ser exigido
             if chave not in self._epis_do_modelo:
-                caixa.state(["disabled"])
+                chip.state(["disabled"])
 
-        # Aviso mostrado quando o modelo instalado não distingue os EPIs
-        self._rotulo_aviso_modelo = ttk.Label(cartao, text="", style="Suave.Cartao.TLabel")
+        self._atualizar_chips()
 
+        # Modelo antigo: não distingue os EPIs, então não há o que escolher
         if not self._epis_do_modelo & set(config.EPIS):
 
             self._caixa_setor.state(["disabled"])
 
-            self._rotulo_aviso_modelo.config(
+            ttk.Label(
+                cartao,
                 text="O modelo instalado ainda não distingue os equipamentos. "
-                     "Colete imagens rotuladas abaixo e rode o treinar.py para ativar."
-            )
-            self._rotulo_aviso_modelo.pack(anchor="w", pady=(6, 0))
-
-    # ------------------------------------------------------
-    # CARTÃO: AJUSTES (limiar, intervalo, câmera)
-    # ------------------------------------------------------
-
-    def _montar_ajustes(self, ao_alternar_camera):
-
-        cartao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 10))
-        cartao.grid(row=4, column=0, sticky="ew", pady=(10, 0))
-
-        # Três colunas: dois controles deslizantes e o botão da câmera
-        cartao.columnconfigure(0, weight=1, uniform="controles")
-        cartao.columnconfigure(1, weight=1, uniform="controles")
-
-        self._rotulo_limiar = self._criar_deslizante(
-            cartao,
-            coluna=0,
-            titulo="Confiança mín.",
-            variavel=self._limiar,
-            minimo=50,
-            maximo=99,
-        )
-
-        self._rotulo_intervalo = self._criar_deslizante(
-            cartao,
-            coluna=1,
-            titulo="Intervalo",
-            variavel=self._intervalo,
-            minimo=0.3,
-            maximo=5.0,
-        )
-
-        self._botao_camera = ttk.Button(
-            cartao,
-            text="Carregando...",
-            style="Primario.TButton",
-            command=ao_alternar_camera,
-            takefocus=False,
-            width=15,
-            state="disabled",
-        )
-        self._botao_camera.grid(row=0, column=2, rowspan=2, sticky="nsew", padx=(16, 0))
-
-        self._atualizar_rotulos_parametros()
-
-    def _criar_deslizante(self, pai, coluna, titulo, variavel, minimo, maximo):
-        """Cria um controle deslizante com título e valor; devolve o rótulo do valor."""
-
-        # Espaço entre os dois controles
-        margem = (0, 20) if coluna == 0 else (0, 0)
-
-        linha_titulo = ttk.Frame(pai, style="Cartao.TFrame")
-        linha_titulo.grid(row=0, column=coluna, sticky="ew", padx=margem)
-
-        ttk.Label(linha_titulo, text=titulo, style="Suave.Cartao.TLabel").pack(side="left")
-
-        rotulo_valor = ttk.Label(linha_titulo, text="", style="Cartao.TLabel", font=FONTES["texto_negrito"])
-        rotulo_valor.pack(side="right")
-
-        ttk.Scale(
-            pai,
-            from_=minimo,
-            to=maximo,
-            orient="horizontal",
-            variable=variavel,
-            command=self._ao_mover_deslizante,
-            takefocus=False,
-        ).grid(row=1, column=coluna, sticky="ew", padx=margem, pady=(6, 0))
-
-        return rotulo_valor
-
-    # ------------------------------------------------------
-    # CARTÃO: COLETA DE IMAGENS ROTULADAS
-    # ------------------------------------------------------
-
-    def _montar_coleta(self):
-
-        cartao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 10))
-        cartao.grid(row=5, column=0, sticky="ew", pady=(10, 0))
-
-        cartao.columnconfigure(0, weight=1)
-
-        linha = ttk.Frame(cartao, style="Cartao.TFrame")
-        linha.grid(row=0, column=0, sticky="ew")
-
-        # O botão é posicionado primeiro (à direita) para nunca ser
-        # cortado; se faltar espaço, quem encolhe é o resumo do dataset.
-        ttk.Button(
-            linha,
-            text="Salvar imagem  [S]",
-            style="Primario.TButton",
-            command=self.salvar_imagem,
-            takefocus=False,
-        ).pack(side="right", padx=(8, 0))
-
-        # Aproveita imagens que já existem no computador. Colar uma
-        # imagem copiada (Ctrl+V) faz o mesmo, sem passar pelo botão.
-        ttk.Button(
-            linha,
-            text="Enviar arquivo",
-            style="Secundario.TButton",
-            command=lambda: self._ao_enviar_arquivos(self.rotulos_marcados()),
-            takefocus=False,
-        ).pack(side="right", padx=(12, 0))
-
-        ttk.Label(
-            linha, text="Coleta de imagens", style="Cartao.TLabel", font=FONTES["texto_negrito"]
-        ).pack(side="left")
-
-        # Rótulos da próxima imagem: o que a pessoa está usando agora
-        linha_epis = ttk.Frame(cartao, style="Cartao.TFrame")
-        linha_epis.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-
-        ttk.Label(linha_epis, text="A pessoa está usando", style="Suave.Cartao.TLabel").pack(side="left")
-
-        for chave in config.EPIS:
-
-            ttk.Checkbutton(
-                linha_epis,
-                text=nome_do_epi(chave),
-                variable=self._usando[chave],
-                style="Cartao.TCheckbutton",
-                takefocus=False,
-            ).pack(side="left", padx=(12, 0))
-
-        # Situação do dataset (total e quantas imagens por EPI), numa
-        # linha própria para nunca ser cortada pelos botões
-        self._rotulo_dataset = ttk.Label(cartao, text="", style="Suave.Cartao.TLabel")
-        self._rotulo_dataset.grid(row=2, column=0, sticky="w", pady=(6, 0))
+                     "Colete imagens (Configurações > Coleta) e rode o treinar.py.",
+                style="Suave.Cartao.TLabel",
+            ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     # ============================================================
     # EVENTOS INTERNOS
     # ============================================================
 
-    def _ao_redimensionar_tela(self, evento):
+    def _ao_redimensionar_tela(self, _evento=None):
 
-        centro = (evento.width // 2, evento.height // 2)
+        largura = self._tela.winfo_width()
+        altura = self._tela.winfo_height()
 
-        self._tela.coords(self._item_imagem, *centro)
-        self._tela.coords(self._item_mensagem, *centro)
+        self._tela.coords(self._item_imagem, largura // 2, altura // 2)
 
-    def nome_camera(self, fonte):
-        """
-        Texto mostrado na lista para uma câmera.
+        self._posicionar_espera()
+        self._posicionar_legendas()
 
-        Webcam: "Câmera N" (o OpenCV só informa o número, não o nome).
-        Câmera IP: o nome dado pelo usuário. O endereço nunca aparece,
-        porque pode conter a senha da câmera.
-        """
+    def _posicionar_espera(self):
+        """Centraliza ícone, textos e botão da tela de espera."""
 
-        if isinstance(fonte, int):
-            return f"Câmera {fonte}"
+        largura = self._tela.winfo_width()
+        altura = self._tela.winfo_height()
 
-        for nome, endereco in self._cameras_ip:
-            if endereco == fonte:
-                return f"{nome} (IP)"
+        centro_x = largura // 2
 
-        return "Câmera IP"
+        # O bloco inteiro (ícone + textos + botão) fica no meio da tela
+        topo = altura // 2 - 80
 
-    @property
-    def webcam_lembrada(self) -> int:
-        """Última webcam usada (para onde voltar quando uma câmera IP é removida)."""
+        corpo, visor, lente = self._icone_espera
 
-        return self._webcam_lembrada
+        self._tela.coords(corpo, centro_x - 34, topo + 10, centro_x + 34, topo + 56)
+        self._tela.coords(visor, centro_x - 12, topo, centro_x + 12, topo + 10)
+        self._tela.coords(lente, centro_x - 13, topo + 20, centro_x + 13, topo + 46)
 
-    def _atualizar_lista_cameras(self):
-        """Refaz a lista: webcams, depois câmeras IP, e por último a opção de adicionar."""
+        self._tela.coords(self._item_mensagem, centro_x, topo + 74)
+        self._tela.itemconfigure(self._item_mensagem, width=max(100, largura - 60))
 
-        if isinstance(self._fonte_camera, int):
-            self._webcam_lembrada = self._fonte_camera
+        caixa = self._tela.bbox(self._item_mensagem)
+        y = (caixa[3] if caixa else topo + 100) + 6
 
-        webcams = set(self._webcams) | {self._webcam_lembrada}
+        self._tela.coords(self._item_detalhe, centro_x, y)
+        self._tela.itemconfigure(self._item_detalhe, width=max(100, largura - 60))
 
-        self._fontes_da_lista = (
-            sorted(webcams)
-            + [endereco for _, endereco in self._cameras_ip]
-            + [OPCAO_ADICIONAR_IP]
-        )
+        caixa = self._tela.bbox(self._item_detalhe)
+        y = (caixa[3] if caixa else y + 20) + 16
 
-        self._caixa_camera.config(
-            values=[
-                TEXTO_ADICIONAR_IP if fonte is OPCAO_ADICIONAR_IP else self.nome_camera(fonte)
-                for fonte in self._fontes_da_lista
-            ]
-        )
+        self._tela.coords(self._item_botao_espera, centro_x, y)
 
-        self._nome_da_camera.set(self.nome_camera(self._fonte_camera))
+    def _posicionar_legendas(self):
+        """Encosta as legendas nos cantos de cima e ajusta o fundo ao tamanho do texto."""
 
-        # "Remover" só faz sentido para câmera IP
-        if isinstance(self._fonte_camera, str):
-            self._botao_remover_ip.pack(side="left", padx=(6, 0), after=self._caixa_camera)
-        else:
-            self._botao_remover_ip.pack_forget()
+        largura = self._tela.winfo_width()
+        margem = MARGEM_LEGENDA
 
-    def _ao_escolher_camera_na_lista(self, _evento=None):
+        fundo, texto = self._legendas["esquerda"]
 
-        # Tira a seleção azul do texto, que o Tkinter deixa na caixa
-        self._caixa_camera.selection_clear()
+        # À esquerda sobra espaço para o ponto do "AO VIVO"
+        self._tela.coords(texto, margem + 22, margem + 6)
+        self._ajustar_fundo(fundo, texto, folga_esquerda=22)
 
-        posicao = self._caixa_camera.current()
+        caixa = self._tela.bbox(texto)
 
-        if posicao < 0:
-            return
+        if caixa:
+            meio = (caixa[1] + caixa[3]) // 2
+            x = margem + 8
+            self._tela.coords(self._ponto_ao_vivo, x, meio - 4, x + 8, meio + 4)
 
-        fonte = self._fontes_da_lista[posicao]
+        fundo, texto = self._legendas["direita"]
 
-        if fonte is OPCAO_ADICIONAR_IP:
+        self._tela.coords(texto, largura - margem - 10, margem + 6)
+        self._ajustar_fundo(fundo, texto)
 
-            # A caixa volta a mostrar a câmera em uso; se o usuário
-            # adicionar uma câmera, a janela principal a seleciona.
-            self._nome_da_camera.set(self.nome_camera(self._fonte_camera))
+    def _ajustar_fundo(self, fundo, texto, folga_esquerda=10):
+        """Estica o retângulo escuro para envolver o texto, com uma folga em volta."""
 
-            self._ao_adicionar_camera_ip()
-            return
+        caixa = self._tela.bbox(texto)
 
-        self._fonte_camera = fonte
-
-        self._atualizar_lista_cameras()
-
-        self._ao_escolher_camera(fonte)
-
-    def _ao_mover_deslizante(self, _valor=None):
-
-        self._atualizar_rotulos_parametros()
-
-        self._ao_mudar_parametros(
-            self._limiar.get() / 100,
-            self._intervalo.get(),
-        )
-
-    def _atualizar_rotulos_parametros(self):
-
-        self._rotulo_limiar.config(text=f"{self._limiar.get():.0f}%")
-        self._rotulo_intervalo.config(text=f"{self._intervalo.get():.1f} s")
+        if caixa:
+            x1, y1, x2, y2 = caixa
+            self._tela.coords(fundo, x1 - folga_esquerda, y1 - 5, x2 + 10, y2 + 5)
 
     def _exigidos(self):
         """Chaves dos EPIs marcados como obrigatórios, na ordem de config.EPIS."""
 
         return tuple(chave for chave in config.EPIS if self._exigir[chave].get())
 
-    def _ao_escolher_setor(self, _evento=None):
-        """Escolher um setor pronto marca de uma vez os EPIs que ele exige."""
+    def _atualizar_chips(self):
+        """Chip ligado ganha um "✓" antes do nome: não depende só da cor."""
+
+        for chave, chip in self._chips.items():
+
+            marca = "✓  " if self._exigir[chave].get() else ""
+
+            chip.config(text=marca + nome_do_epi(chave))
+
+    def _ao_escolher_setor_na_lista(self, _evento=None):
 
         # Tira a seleção azul do texto, que o Tkinter deixa na caixa
         self._caixa_setor.selection_clear()
 
-        exigidos_do_setor = config.SETORES.get(self._setor.get(), [])
-
-        for chave, variavel in self._exigir.items():
-            variavel.set(chave in exigidos_do_setor and chave in self._epis_do_modelo)
-
-        self._avisar_fiscalizacao()
+        self._ao_escolher_setor(self._setor.get())
 
     def _ao_marcar_exigido(self):
         """
-        Marcar ou desmarcar um EPI à mão: se a combinação bater com um
+        Ligar ou desligar um EPI à mão: se a combinação bater com um
         setor pronto, o nome dele aparece; senão, vira "Personalizado".
         """
+
+        self._atualizar_chips()
 
         marcados = set(self._exigidos())
 
@@ -593,25 +509,28 @@ class PainelMonitoramento(ttk.Frame):
 
         self._setor.set(setor)
 
-        self._avisar_fiscalizacao()
-
-    def _avisar_fiscalizacao(self):
-
-        self._ao_mudar_fiscalizacao(self._setor.get(), self._exigidos())
+        self._ao_mudar_fiscalizacao(setor, self._exigidos())
 
     # ============================================================
     # MÉTODOS USADOS PELA JANELA PRINCIPAL
     # ============================================================
 
-    def rotulos_marcados(self):
-        """Chaves dos EPIs marcados em "A pessoa está usando"."""
+    def mostrar_fiscalizacao(self, setor, exigidos):
+        """Mostra o setor e liga os EPIs exigidos. Só muda a tela: não avisa ninguém."""
 
-        return {chave for chave, variavel in self._usando.items() if variavel.get()}
+        self._setor.set(setor)
 
-    def salvar_imagem(self):
-        """Pede à janela principal para salvar o frame com os rótulos marcados."""
+        for chave, variavel in self._exigir.items():
+            variavel.set(chave in exigidos)
 
-        self._ao_salvar_imagem(self.rotulos_marcados())
+        self._atualizar_chips()
+
+    def definir_camera(self, nome_camera, comanda_catraca):
+        """Nome da câmera da área e a etiqueta "comanda a catraca"."""
+
+        self._rotulo_camera.config(text=nome_camera)
+
+        self._rotulo_catraca.config(text="comanda a catraca" if comanda_catraca else "")
 
     def tamanho_do_video(self):
         """(largura, altura) em pixels do espaço disponível para o vídeo."""
@@ -624,26 +543,116 @@ class PainelMonitoramento(ttk.Frame):
         self._imagem_video = imagem_tk
 
         self._tela.itemconfigure(self._item_imagem, image=imagem_tk)
-        self._tela.itemconfigure(self._item_mensagem, text="")
 
-    def mostrar_mensagem(self, texto):
-        """Apaga o vídeo e escreve uma mensagem no lugar dele."""
+        self._esconder_espera()
+
+    def mostrar_mensagem(self, texto, botao=None):
+        """
+        Apaga o vídeo e mostra a tela de espera.
+
+        texto -> a primeira linha é o título; as outras, a explicação
+        botao -> texto do botão no meio da tela (liga a câmera); None = sem botão
+        """
 
         self._imagem_video = None
 
         self._tela.itemconfigure(self._item_imagem, image="")
-        self._tela.itemconfigure(self._item_mensagem, text=texto)
+
+        titulo, _, detalhe = texto.partition("\n")
+
+        self._tela.itemconfigure(self._item_mensagem, text=titulo, state="normal")
+        self._tela.itemconfigure(self._item_detalhe, text=detalhe, state="normal")
+
+        for item in self._icone_espera:
+            self._tela.itemconfigure(item, state="normal")
+
+        if botao:
+            self._botao_espera.config(text=botao)
+            self._tela.itemconfigure(self._item_botao_espera, state="normal")
+        else:
+            self._tela.itemconfigure(self._item_botao_espera, state="hidden")
+
+        self._posicionar_espera()
+
+        # Sem vídeo, as legendas de "ao vivo" não fazem sentido
+        self.definir_legenda("", "")
+
+    def mensagem(self):
+        """(título, detalhe) da tela de espera; vazios com vídeo (usado nos testes)."""
+
+        if self._tela.itemcget(self._item_mensagem, "state") == "hidden":
+            return "", ""
+
+        return self._tela.itemcget(self._item_mensagem, "text"), self._tela.itemcget(self._item_detalhe, "text")
+
+    def _esconder_espera(self):
+
+        for item in (*self._icone_espera, self._item_mensagem, self._item_detalhe, self._item_botao_espera):
+            self._tela.itemconfigure(item, state="hidden")
+
+    def definir_legenda(self, esquerda, direita, ponto_aceso=True):
+        """
+        Legendas sobre o vídeo. Texto da esquerda vazio esconde as duas.
+
+        ponto_aceso -> o ponto vermelho do "AO VIVO" (alternar faz piscar)
+        """
+
+        visivel = "normal" if esquerda else "hidden"
+
+        for lado, texto_lado in (("esquerda", esquerda), ("direita", direita)):
+
+            fundo, texto = self._legendas[lado]
+
+            self._tela.itemconfigure(texto, text=texto_lado, state=visivel)
+            self._tela.itemconfigure(fundo, state=visivel if texto_lado else "hidden")
+
+        self._tela.itemconfigure(self._ponto_ao_vivo, state=visivel if ponto_aceso else "hidden")
+
+        # As legendas ficam por cima da imagem
+        for fundo, texto in self._legendas.values():
+            self._tela.tag_raise(fundo)
+            self._tela.tag_raise(texto)
+
+        self._tela.tag_raise(self._ponto_ao_vivo)
+
+        if esquerda:
+            self._posicionar_legendas()
+
+    def legenda(self):
+        """(esquerda, direita): os textos das legendas sobre o vídeo (usado nos testes)."""
+
+        return tuple(self._tela.itemcget(texto, "text") for _, texto in self._legendas.values())
 
     def definir_status(self, titulo, detalhe, cor):
-        """Atualiza a faixa de status (texto grande, texto de apoio e cor)."""
+        """
+        Atualiza a faixa de status.
 
-        for componente in (self._faixa_status, self._rotulo_status, self._rotulo_detalhe):
-            componente.config(bg=cor)
+        Liberado, negado e analisando: faixa CHEIA da cor, texto branco
+        (precisa ser vista de longe, na catraca). Aguardando, câmera
+        desligada e carregando: cartão discreto com um filete da cor.
+        """
 
-        self._rotulo_status.config(text=titulo)
-        self._rotulo_detalhe.config(text=detalhe)
+        forte = cor in (CORES[chave] for chave in CHAVES_DE_COR_FORTE)
+
+        if forte:
+            fundo, texto, apoio, filete = cor, "white", "white", cor
+        else:
+            fundo, texto, apoio, filete = CORES["cartao"], CORES["texto"], CORES["texto_suave"], cor
+
+        self._faixa_status.config(bg=fundo)
+        self._filete_status.config(bg=filete)
+
+        self._icone_status.config(text=icone_da_cor(cor), bg=fundo, fg=texto if forte else cor)
+        self._rotulo_status.config(text=titulo, bg=fundo, fg=texto)
+        self._rotulo_detalhe.config(text=detalhe, bg=fundo, fg=apoio)
+
+    def status(self):
+        """(título, detalhe) da faixa de status (usado nos testes)."""
+
+        return self._rotulo_status.cget("text"), self._rotulo_detalhe.cget("text")
 
     def definir_botao_camera(self, texto, estilo, habilitado=True):
+        """Botão principal da câmera; "Capturar foto" só funciona com vídeo."""
 
         self._botao_camera.config(
             text=texto,
@@ -651,43 +660,7 @@ class PainelMonitoramento(ttk.Frame):
             state="normal" if habilitado else "disabled",
         )
 
-    def definir_cameras(self, indices):
-        """Preenche a lista com as webcams encontradas pela busca."""
+        # Só há o que capturar com a câmera ligada (botão virou "Parar")
+        com_video = habilitado and estilo == "Perigo.TButton"
 
-        self._webcams = list(indices)
-
-        self._atualizar_lista_cameras()
-
-    def definir_cameras_ip(self, cameras_ip, fonte_em_uso):
-        """
-        Atualiza as câmeras IP da lista e qual câmera está em uso.
-        Chamado pela janela principal depois de adicionar ou remover uma.
-        """
-
-        self._cameras_ip = list(cameras_ip)
-        self._fonte_camera = fonte_em_uso
-
-        self._atualizar_lista_cameras()
-
-    def definir_desempenho(self, texto):
-
-        self._rotulo_desempenho.config(text=texto)
-
-    def definir_resumo_dataset(self, total, usando_por_epi):
-        """Mostra quantas imagens rotuladas existem, no total e por EPI."""
-
-        if total == 0:
-            texto = "Nenhuma imagem rotulada ainda."
-
-        else:
-
-            # Ex.: "128 imagens: Capacete 60, Óculos 41, ..." (quantas
-            # mostram a pessoa USANDO cada equipamento)
-            partes = [
-                f"{nome_do_epi(chave)} {quantidade}"
-                for chave, quantidade in usando_por_epi.items()
-            ]
-
-            texto = f"{total} imagens: " + ", ".join(partes)
-
-        self._rotulo_dataset.config(text=texto)
+        self._botao_foto.state(["!disabled"] if com_video else ["disabled"])

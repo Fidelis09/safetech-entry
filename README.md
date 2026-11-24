@@ -29,7 +29,13 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 ## Funcionalidades
 
 - **Vídeo ao vivo** da webcam, fluido e ajustado ao tamanho da janela.
-- **Câmera IP**: câmeras de segurança (`rtsp://`) ou o celular (`http://`) adicionadas pela própria tela, com reconexão automática quando a rede cai.
+- **Câmera IP**: câmeras de segurança (`rtsp://`) ou o celular (`http://`) adicionadas pela própria tela, com reconexão automática quando a rede cai. A webcam USB também se reabre sozinha se o cabo falhar.
+- **Legendas sobre o vídeo**, como num monitor de segurança: "● AO VIVO", nome da área, data e hora, resolução real, quadros por segundo, análises por segundo e pessoas na imagem.
+- **Visão geral**: com duas áreas ou mais, todas lado a lado, cada uma com a sua situação colorida; clicar num quadro abre a aba da área.
+- **Fotos de evidência carimbadas**: data e hora, área, pessoa e resultado gravados na própria foto.
+- **Bipe de acesso negado** no modo Catraca (pode ser desligado no `config.py`).
+- **Tema escuro e tema claro**, no programa (botão no cabeçalho, troca na hora e fica salvo) e no painel web (botão próprio, guardado no navegador).
+- **Capturar foto**: guarda o momento de uma câmera (com caixas e carimbo) em `auditoria/capturas/`, fora do log.
 - **EPIs reconhecidos separadamente**: o modelo dá uma resposta independente para cada equipamento.
 - **Fiscalização por setor**: perfis prontos (cada setor com seus EPIs obrigatórios) e caixas de seleção para ajustar na hora. A última seleção é lembrada ao reabrir o programa.
 - **Várias pessoas ao mesmo tempo** (fila): cada uma recebe uma caixa que a acompanha, com número e o que está faltando.
@@ -38,12 +44,15 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - **Dois modos de operação**: **Catraca** (libera ou nega o acesso, e a catraca física obedece) e **Vigilância** (verifica se todos numa área estão em conformidade e registra, sem liberar nada).
 - **Status em destaque**: na catraca, liberado (verde) ou negado (vermelho); na vigilância, em conformidade ou não conforme; e analisando (laranja) ou aguardando.
 - **Confiança mínima e intervalo de análise** ajustáveis na tela, com efeito imediato.
-- **Auditoria na mesma tela**: indicadores, filtros, busca, ordenação por coluna e foto de evidência do evento selecionado. Cada evento guarda o setor, o que era exigido e o que faltava.
+- **Auditoria na mesma tela**: indicadores, filtros (resultado, **período** e busca), ordenação por coluna e foto de evidência do evento selecionado. Cada evento guarda o setor, o que era exigido e o que faltava.
+- **Exportar CSV**: o que está filtrado vai para uma planilha que o Excel em português abre direto (também pelo painel web).
 - **Relatório de um evento**: um clique gera uma página com todos os dados do momento da linha selecionada, a foto e os outros eventos do mesmo instante.
 - **Excluir linha sem perder o registro**: o evento sai da tabela, mas vai para uma pasta de excluídos, com a data da exclusão.
 - **Catraca de demonstração com ESP32**: maquete com cancela (servo), LEDs, bipe e tela que obedece ao sistema pelo Wi-Fi (pasta `catraca_esp32/`).
-- **Testes automatizados**: 103 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
+- **Várias câmeras (áreas)**: cada área abre numa aba, com a sua própria câmera, setor, EPIs e modo. A auditoria continua uma só, com a área de cada evento.
+- **Testes automatizados**: 195 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
 - **Coleta de dataset rotulada**: marque o que a pessoa está usando e salve, por botão ou atalho de teclado.
+- **Painel web ajustado na tela**: ligar, porta, acesso pela rede, usuário e senha em **Configurações > Painel web**. A senha fica guardada só como hash.
 - **Painel web do gerente**, somente leitura: status ao vivo, indicadores, gráfico e fotos pelo navegador, inclusive no celular.
 - **Abertura imediata**: a janela aparece na hora e o modelo de IA carrega em segundo plano.
 
@@ -100,23 +109,51 @@ A janela abre na hora, com a mensagem "Carregando o modelo de IA". Quando o bot�
 
 ### A tela
 
+A tela principal tem só o que se usa durante a operação. Em cima, a marca, os **selos de situação** e o botão do **tema**; à esquerda, a **barra de áreas** e a página da área escolhida; à direita, a auditoria de todas as áreas. O resto fica no botão **Configurações**, no canto de cima.
+
 | Área | O que faz |
 |---|---|
-| **Vídeo** | Imagem da câmera com um contorno fino por pessoa e uma única palavra: verde `OK`, vermelho `NEGADO`, cinza `...` (ainda analisando). O contorno é discreto de propósito, para não cobrir ninguém quando há muita gente. |
-| **Faixa de status** | Decisão geral da catraca, quantas pessoas estão irregulares, em quantas falta cada EPI e o que o setor exige. O detalhe por pessoa fica na auditoria. |
-| **Fiscalização** | O setor em fiscalização e os EPIs obrigatórios nele (veja abaixo). |
-| **Confiança mínima** | Confiança necessária para considerar que a pessoa está usando um EPI. Mais alto = mais rigoroso. |
-| **Intervalo de análise** | De quanto em quanto tempo cada pessoa é reclassificada. |
-| **Coleta de imagens** | Salva o recorte de cada pessoa, com os rótulos marcados, para treinar o modelo. |
-| **Câmera** | Lista no topo do vídeo: webcams encontradas, câmeras IP cadastradas e a opção **+ Adicionar câmera IP...** |
-| **Auditoria** | Indicadores, filtros e tabela de eventos, atualizados ao vivo. Clique em um evento para ver a foto, o que era exigido e a confiança de cada EPI; duplo clique abre a foto em tamanho real. Clique no título de uma coluna para ordenar. Com uma linha selecionada, **Salvar relatório** e **Excluir linha** passam a funcionar. |
+| **Cabeçalho** | Selos com ponto colorido: **IA** (carregando, pronta com quantos EPIs, ou com erro), **Painel web** (clique abre no navegador) e **Catraca** (conectada ou procurando). Botão **Tema claro / Tema escuro** (troca na hora; a escolha fica salva). À direita, data e hora. |
+| **Barra de áreas** | **Visão geral** (todas as câmeras lado a lado, com 2 áreas ou mais), uma **pílula por área** com um ponto na cor da situação dela agora (verde, vermelho, amarelo, cinza) e **+ Nova área**. A área que comanda a catraca tem "· catraca" no nome. |
+| **Câmera da área** | Em cima do vídeo: qual câmera a área usa e os botões **Trocar câmera** (abre as Configurações já na área), **Capturar foto** e **▶ Iniciar / ■ Parar câmera**. Com a câmera desligada, o vídeo dá lugar a uma tela de espera com o botão de ligar no meio. |
+| **Vídeo** | Imagem da câmera com um contorno fino por pessoa e uma única palavra: verde `OK`, vermelho `NEGADO`, cinza `...` (ainda analisando). O contorno é discreto de propósito, para não cobrir ninguém quando há muita gente. Em cima, as legendas: "● AO VIVO", área, data e hora à esquerda; resolução, fps, análises/s e pessoas à direita. |
+| **Faixa de status** | Símbolo (✔ ✖ ◔ ●) e decisão geral, quantas pessoas estão irregulares, em quantas falta cada EPI e o que o setor exige. Liberado, negado e analisando enchem a faixa de cor (para ver de longe); aguardando e câmera desligada ficam num cartão discreto. O detalhe por pessoa fica na auditoria. |
+| **Visão geral** | Todas as câmeras lado a lado, cada uma com a sua situação e a borda na cor dela. Passar o mouse destaca o quadro; clicar abre a página da área (a pílula **Visão geral** volta para cá). Câmera desligada tem o botão **Ligar câmera** no próprio quadro. |
+| **Fiscalização (abaixo do vídeo)** | **Setor**, **Modo** (Catraca ou Vigilância) e os **EPIs exigidos** como botões que ligam e desligam (azul com ✓ = exigido). Valem só para aquela área. |
+| **Configurações** | Botão no topo do monitoramento: abre a janela com o resto (veja abaixo). |
+| **Auditoria** | Acompanha a esquerda: com uma área aberta, mostra **só os eventos dela** (o título diz "Auditoria · Portaria"); na **Visão geral**, os de **todas as áreas**. Cartões, tabela e exportação seguem junto. Indicadores do período, filtros (Todos / Conformes / Irregulares, período e busca) e tabela de eventos, atualizados ao vivo. Clique em um evento para ver a foto, o que era exigido e a confiança de cada EPI; duplo clique abre a foto em tamanho real. Clique no título de uma coluna para ordenar. No cabeçalho: **Exportar CSV**, **Abrir pasta** e **Zerar**. No cartão **Evento selecionado**, embaixo: **Salvar relatório** e **Excluir**. |
+
+### Configurações
+
+O botão **Configurações** abre uma janela com abas. Tudo vale na hora e fica salvo para a próxima vez. Fechar a janela só a esconde: o que estiver marcado continua valendo.
+
+| Aba | O que tem |
+|---|---|
+| **Área e câmera** | Vale para a **área aberta**: renomear, remover, **"Esta área comanda a catraca física"**, qual câmera ela usa, **Adicionar câmera IP...**, **Remover câmera IP** e **+ Nova área...** |
+| **Painel web** | **Ligar o painel**, **acesso pela rede** (ou só este computador), **porta**, **exigir usuário e senha**, **usuário** e **nova senha** (com confirmação e "Mostrar senha"). Vale ao clicar em **Aplicar**: o painel reinicia na hora e o resultado aparece embaixo (ex.: "porta em uso"). Avisa se ainda é a senha padrão ou se está sem senha. **Abrir no navegador** abre o painel |
+| **Análise** | **Confiança mínima** (mais alto = mais rigoroso) e **intervalo de análise** (de quanto em quanto tempo cada pessoa é verificada de novo), com **Voltar aos valores padrão**. Valem para todas as áreas |
+| **Coleta de imagens** | O que a pessoa na câmera está usando, **Salvar imagem da câmera**, **Enviar arquivo...** e o resumo do dataset |
+
+### Várias câmeras: áreas
+
+Cada **área** é uma câmera com a sua própria fiscalização, numa aba da tela principal. Por exemplo: "Portaria" no modo Catraca, exigindo capacete e colete, e "Laboratório" no modo Vigilância, exigindo óculos e luvas.
+
+- **Criar:** clique na aba **+ Nova área** (ou em Configurações > Área e câmera > **+ Nova área...**), dê um nome e escolha a câmera.
+- **Renomear, remover e trocar a câmera:** em **Configurações > Área e câmera**, que vale para a aba aberta. A última área não pode ser removida.
+- **Catraca física:** só uma área a comanda. Marque **"Esta área comanda a catraca física"** na área certa; a aba dela ganha "· catraca" no nome. Sem nenhuma marcada, a catraca fica fechada.
+- **Auditoria:** uma só para todas. Cada evento guarda a **Área** de onde veio (coluna na tabela, no relatório e no painel web).
+- **Análise:** todas as áreas analisam ao mesmo tempo, mesmo as que não estão à vista. Só a aba aberta é desenhada na tela.
+
+Limites: uma webcam só funciona em uma área de cada vez (câmeras IP podem se repetir). Cada área é uma câmera e uma análise rodando juntas, então o computador fica mais lento a cada área; o máximo é `MAXIMO_AREAS` (6). Se ficar lento, aumente o intervalo de análise.
+
+O modelo de EPI é carregado uma vez e atende uma área por vez. Os detectores de pessoa são um por área.
 
 ### Fiscalização por setor
 
-Cada setor da empresa pode exigir EPIs diferentes. Na área **Fiscalização**:
+Cada setor da empresa pode exigir EPIs diferentes. Na aba da área:
 
-1. Escolha o **setor** na lista. Os EPIs obrigatórios dele são marcados de uma vez.
-2. Se precisar, **marque ou desmarque** cada EPI à mão. Se a combinação não corresponder a nenhum setor pronto, o setor aparece como "Personalizado".
+1. Escolha o **setor** na lista abaixo do vídeo. Os EPIs obrigatórios dele são marcados de uma vez.
+2. Se precisar, **marque ou desmarque** cada EPI à mão, na linha **EPIs exigidos**. Se a combinação não corresponder a nenhum setor pronto, o setor aparece como "Personalizado".
 
 A mudança vale na hora, sem reiniciar nada. O sistema continua enxergando todos os equipamentos; a seleção define apenas **quais deles contam** para liberar ou negar. A última seleção fica salva e é restaurada quando o programa é aberto de novo.
 
@@ -134,7 +171,7 @@ O divisor entre os dois painéis pode ser arrastado para dar mais espaço ao ví
 
 ### Modo de operação: catraca ou vigilância
 
-Na área **Fiscalização**, o seletor **Modo** escolhe como o sistema trabalha. A troca vale na hora, sem reiniciar o programa nem a câmera, e a escolha fica salva.
+Abaixo do vídeo de cada área, o seletor **Modo** escolhe como aquela área trabalha. A troca vale na hora, sem reiniciar o programa nem a câmera, e a escolha fica salva.
 
 | | **Catraca** | **Vigilância** |
 |---|---|---|
@@ -165,11 +202,11 @@ Invoke-WebRequest -Uri "https://github.com/opencv/opencv_zoo/raw/main/models/obj
 
 Além da webcam, o programa abre câmeras pela rede: câmeras de segurança (endereço `rtsp://`) e câmeras simples ou o celular (endereço `http://`).
 
-1. Na lista **Câmera**, no topo do vídeo, escolha **+ Adicionar câmera IP...**.
+1. Abra a aba da área e, em **Configurações > Área e câmera**, clique em **Adicionar câmera IP...**.
 2. Preencha o **nome** (ex.: "Portaria"), o **endereço do vídeo** e, se a câmera pedir, **usuário** e **senha**.
 3. Clique em **Adicionar**. A câmera entra na lista como "Portaria (IP)", liga na hora e fica salva para as próximas vezes.
 
-Com uma câmera IP selecionada, o botão **Remover**, ao lado da lista, tira a câmera do cadastro e volta para a última webcam usada.
+Com uma câmera IP selecionada, o botão **Remover câmera IP**, na mesma aba, tira a câmera do cadastro; as áreas que a usavam voltam para a última webcam usada.
 
 | Câmera | Endereço típico |
 |---|---|
@@ -189,9 +226,10 @@ Dicas:
 | Tecla | Ação |
 |---|---|
 | `Espaço` | Liga ou desliga a câmera |
-| `S` | Salva uma imagem da câmera com os rótulos marcados na área de coleta |
+| `S` | Salva uma imagem da câmera com os rótulos marcados em **Configurações > Coleta de imagens** (funciona com a janela fechada) |
 | `Ctrl+V` | Cola no dataset uma imagem copiada (ou arquivos de imagem copiados), com os rótulos marcados |
-| `Esc` | Limpa a busca da auditoria |
+| `F11` | Tela cheia (monitor da portaria, apresentação) |
+| `Esc` | Sai da tela cheia; fora dela, limpa a busca da auditoria |
 | `Delete` | Exclui a linha selecionada na tabela de auditoria (com confirmação) |
 
 Os atalhos ficam desativados enquanto você digita no campo de busca.
@@ -213,9 +251,9 @@ Página de acompanhamento pelo navegador, **somente leitura**: o gerente vê os 
 ### Como acessar
 
 1. Abra o aplicativo (`python app.py`). O painel web sobe junto.
-2. O endereço aparece no canto inferior esquerdo da janela, por exemplo `Painel web: http://192.168.0.15:8080`. Clicar nele abre o navegador.
+2. O endereço aparece no selo do cabeçalho da janela, por exemplo `Painel web: http://192.168.0.15:8080`. Clicar nele abre o navegador. Selo amarelo = ainda com a senha padrão ou sem senha; "Painel web desligado" = clique para ir às Configurações.
 3. No computador do gerente (ou no celular), na **mesma rede**, digite esse endereço.
-4. Informe o login: usuário `gerente`, senha definida em `safetech/config.py`.
+4. Informe o login definido em **Configurações > Painel web**. Até a primeira troca, vale o do `safetech/config.py` (usuário `gerente`); **troque a senha antes de usar de verdade**, porque a padrão está no repositório.
 
 Na primeira vez, o Windows pode perguntar se o Python pode aceitar conexões da rede. É preciso permitir para que outros aparelhos acessem.
 
@@ -223,14 +261,15 @@ Na primeira vez, o Windows pode perguntar se o Python pode aceitar conexões da 
 
 | Área | Conteúdo |
 |---|---|
+| **Áreas** | Com duas câmeras ou mais: um cartão por área, com a imagem atual, a situação (cor e símbolo), o modo, o setor e quantas pessoas estão irregulares. Atualiza a cada 2 segundos. |
 | **Ao vivo** | Imagem atual da câmera com as caixas, o setor em fiscalização e o que ele exige, status da catraca e o que falta para cada pessoa. Atualiza a cada segundo. |
 | **Hoje** | Eventos, conformes, irregulares e taxa de conformidade do dia, com o total do histórico abaixo de cada número. "Conforme" é quem foi liberado (catraca) ou estava com os EPIs (vigilância). |
 | **Eventos por hora** | Gráfico de barras do dia. Passar o mouse numa hora mostra os números. |
-| **Eventos de auditoria** | Os eventos mais recentes, com miniatura da foto, setor, EPIs exigidos e o que faltava, além de filtros e busca. Clicar numa linha abre a foto em tamanho grande. |
+| **Eventos de auditoria** | Os eventos mais recentes, com miniatura da foto, setor, EPIs exigidos e o que faltava, além de filtros e busca. Clicar numa linha abre a foto em tamanho grande. **Exportar CSV** baixa o histórico inteiro numa planilha (só leitura: é um download). |
 
 O gerente **vê** qual setor está sendo fiscalizado, mas não consegue mudá-lo: a escolha do setor é feita só no aplicativo.
 
-A página funciona em celular e não depende de internet (não carrega nada de fora).
+A página funciona em celular e não depende de internet (não carrega nada de fora). O botão **Tema claro / Tema escuro** do cabeçalho muda só a aparência naquele navegador (a escolha fica guardada nele); sem escolha, a página segue o tema do sistema do aparelho.
 
 ### Catraca de demonstração (ESP32)
 
@@ -252,11 +291,12 @@ Sobe o mesmo painel sem câmera: indicadores, gráfico, eventos e fotos. Não ab
 ### Segurança
 
 - **Somente leitura de verdade**: o servidor só responde a pedidos de leitura (GET). Qualquer tentativa de envio ou alteração é recusada, e não existe rota que mude o sistema.
-- **Login obrigatório**: o painel mostra fotos de pessoas, então pede usuário e senha. **Troque a senha padrão** (`PAINEL_WEB_SENHA`) antes de usar fora de testes.
+- **Login obrigatório**: o painel mostra fotos de pessoas, então pede usuário e senha. **Troque a senha padrão** em Configurações > Painel web antes de usar fora de testes.
+- **A senha não fica guardada**: o `preferencias.json` (fora do git) guarda só um hash PBKDF2 com sal aleatório. Quem abrir o arquivo não descobre a senha. Conferir uma senha é lento de propósito (~0,1 s); o servidor lembra dos logins já conferidos para não repetir o cálculo a cada pedido.
 - **Só as fotos de evidência são servidas**: pedidos que tentam alcançar outros arquivos do computador são recusados.
 - **Limite conhecido**: a conexão é HTTP simples, sem criptografia. Use apenas em rede local de confiança, nunca exposto à internet.
 
-Para restringir o painel a este computador, use `PAINEL_WEB_HOST = "127.0.0.1"`. Para desligar, `PAINEL_WEB_ATIVO = False`.
+Para restringir o painel a este computador, desmarque **Permitir acesso pela rede**; para desligar, desmarque **Ligar o painel web** (Configurações > Painel web). O `painel_web.py` usa os mesmos ajustes.
 
 ---
 
@@ -374,8 +414,13 @@ Tech_day_26.2/
 │   │
 │   ├── interface/          A janela (Tkinter)
 │   │   ├── tema.py                  Cores, fontes e estilos
-│   │   ├── painel_monitoramento.py  Vídeo, status, fiscalização, ajustes e coleta
+│   │   ├── area_monitorada.py       Uma área: câmera + análise + aba (e o desenho dela)
+│   │   ├── painel_visao_geral.py    Visão geral: todas as áreas lado a lado
+│   │   ├── componentes.py           Selos do cabeçalho e barra de áreas (pílulas)
+│   │   ├── painel_monitoramento.py  A aba de uma área: vídeo, status, setor, modo, EPIs e câmera
+│   │   ├── dialogo_area.py          Janela "Nova área" / "Renomear área"
 │   │   ├── painel_auditoria.py      Indicadores, filtros, tabela e evidência
+│   │   ├── janela_configuracoes.py  Janela de Configurações (área e câmera, análise, coleta)
 │   │   ├── dialogo_camera_ip.py     Janela "Adicionar câmera IP"
 │   │   └── janela_principal.py      Monta a tela e liga tudo
 │   │
@@ -416,8 +461,8 @@ Para o modelo reconhecer cada equipamento separadamente, ele precisa de imagens 
 ### Passo a passo
 
 1. Abra o programa e ligue a câmera.
-2. Na área **Coleta de imagens**, marque o que a pessoa na câmera **está usando agora**. Por exemplo, se ela está só de capacete e luvas, marque `Capacete` e `Luvas`.
-3. Pressione `S` (ou clique em **Salvar imagem**) várias vezes, variando posição, distância, ângulo e iluminação.
+2. Em **Configurações > Coleta de imagens**, marque o que a pessoa na câmera **está usando agora**. Por exemplo, se ela está só de capacete e luvas, marque `Capacete` e `Luvas`.
+3. Pressione `S` (ou clique em **Salvar imagem da câmera**) várias vezes, variando posição, distância, ângulo e iluminação.
 4. Troque os equipamentos, **atualize as caixas marcadas** e repita. O aviso no rodapé repete os rótulos de cada imagem salva: confira, porque um rótulo errado ensina o modelo errado.
 5. Feche o programa e treine:
 
@@ -425,15 +470,15 @@ Para o modelo reconhecer cada equipamento separadamente, ele precisa de imagens 
    python treinar.py
    ```
 
-6. Abra o programa novamente. O modelo por EPI passa a ser usado automaticamente e a área de fiscalização é ativada.
+6. Abra o programa novamente. O modelo por EPI passa a ser usado automaticamente e a escolha de setor e EPIs é ativada.
 
 ### Usar imagens que já existem
 
-Além da câmera, a área de coleta aceita imagens prontas. Elas recebem os rótulos que estiverem marcados no momento, então **marque primeiro, importe depois**.
+Além da câmera, a coleta aceita imagens prontas. Elas recebem os rótulos que estiverem marcados no momento, então **marque primeiro, importe depois**.
 
 | Forma | Como |
 |---|---|
-| **Enviar arquivo** | Botão na área de coleta. Dá para escolher várias imagens de uma vez (todas recebem os mesmos rótulos). |
+| **Enviar arquivo...** | Botão em **Configurações > Coleta de imagens**. Dá para escolher várias imagens de uma vez (todas recebem os mesmos rótulos). |
 | **Colar (`Ctrl+V`)** | Copie uma imagem (captura de tela, "copiar imagem" do navegador) ou copie arquivos de imagem no Explorador de Arquivos, e pressione `Ctrl+V` na janela do programa. |
 
 A importação funciona com a câmera desligada. Cada imagem passa pelo mesmo tratamento da câmera: o detector acha as pessoas e o que é salvo é o recorte de cada uma; se ninguém for encontrado, a imagem inteira é salva. O aviso no rodapé informa quantas imagens entraram, quantos recortes geraram e com quais rótulos. Arquivos que não são imagens são ignorados.
@@ -494,10 +539,19 @@ O log fica em `auditoria/log_auditoria.csv`, e as fotos em `auditoria/imagens/`.
 | `liberado` | `SIM` ou `NAO`: a pessoa estava com todos os EPIs exigidos? (na catraca, liberado; na vigilância, conforme) |
 | `imagem` | Arquivo da foto de evidência |
 | `modo` | `catraca` ou `vigilancia`: diz como ler o resultado |
+| `area` | Nome da área (câmera) onde o evento aconteceu |
 
 Logs de versões anteriores, sem a coluna `modo`, são convertidos ao abrir o programa: os eventos ganham o modo `catraca` e o arquivo original fica guardado como `log_auditoria_formato_antigo_<data>.csv`.
 
-Cada evento tem uma foto do frame inteiro, com a pessoa em questão destacada.
+As fotos do botão **Capturar foto** (da câmera de uma área) ficam em `auditoria/capturas/`, com as caixas e o mesmo carimbo, mas **não** entram no log: são registros avulsos do operador.
+
+Cada evento tem uma foto do frame inteiro, com a pessoa em questão destacada e um **carimbo** no rodapé (ex.: `SafeTech Entry | 2026-11-24 14:10:32 | Area: Portaria | P003 | Negado`). Assim a foto continua dizendo de quando e de onde é, mesmo copiada para fora do sistema. Desligue com `CARIMBAR_EVIDENCIA = False`.
+
+### Exportar para planilha
+
+**Exportar CSV**, no cabeçalho da auditoria, grava numa planilha **o que está filtrado na tela** (área aberta, período, resultado e busca). Para exportar todas as áreas juntas, abra a **Visão geral** antes. Os cabeçalhos saem por extenso ("Data e hora", "Área", "Resultado"...), o resultado no texto do modo ("Liberado", "Não conforme") e o arquivo usa `;` e a marca UTF-8 que o Excel em português precisa para abrir direto, com acentos. O log de auditoria não muda.
+
+O **período** (Hoje, Últimos 7 dias, Últimos 30 dias, Todo o histórico) vale para os cartões de totais, a tabela e a exportação. Os períodos ficam em `PERIODOS_AUDITORIA`, no `config.py`.
 
 ### Zerar a auditoria
 
@@ -519,7 +573,7 @@ As fotos são **copiadas**: o log e a foto original não mudam. A pasta pode ser
 
 ### Excluir uma linha
 
-Selecione a linha e clique em **Excluir linha** (ou pressione `Delete`). Depois da confirmação, o evento sai da tabela, do log e do painel web.
+Selecione a linha e clique em **Excluir**, no cartão do evento selecionado (ou pressione `Delete`). Depois da confirmação, o evento sai da tabela, do log e do painel web.
 
 Como no Zerar, **nada é apagado**: a linha vai para `auditoria/excluidos/log_excluidos.csv`, com uma coluna a mais (`excluido_em`, a data da exclusão), e a foto vai para `auditoria/excluidos/imagens/`.
 
@@ -551,8 +605,10 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `EPIS` | capacete, óculos, colete, luvas | Equipamentos fiscalizados. Mudar exige coletar e treinar de novo |
 | `SETORES` | 5 setores de exemplo | Perfis prontos: nome do setor e os EPIs obrigatórios nele |
 | `SETOR_PADRAO` | `"Acesso geral"` | Setor selecionado na primeira vez que o programa abre |
-| `LIMIAR_CONFIANCA_PADRAO` | `0.80` | Confiança mínima para considerar que a pessoa usa um EPI (valor inicial do controle) |
-| `INTERVALO_CLASSIFICACAO_PADRAO_SEG` | `1.0` | Intervalo de reclassificação (valor inicial do controle) |
+| `LIMIAR_CONFIANCA_PADRAO` | `0.80` | Confiança mínima para considerar que a pessoa usa um EPI (valor da primeira abertura e do botão "Voltar aos valores padrão"; depois vale o escolhido em Configurações, que fica salvo) |
+| `INTERVALO_CLASSIFICACAO_PADRAO_SEG` | `1.0` | Intervalo de reclassificação (mesma regra da confiança) |
+| `LIMIAR_CONFIANCA_MINIMO` / `_MAXIMO` | `0.50` / `0.99` | Faixa do controle de confiança |
+| `INTERVALO_CLASSIFICACAO_MINIMO_SEG` / `_MAXIMO_SEG` | `0.3` / `5.0` | Faixa do controle de intervalo |
 | `TAMANHO_HISTORICO_DECISAO` | `5` | Quantas classificações entram na mediana da decisão |
 | `CONFIRMACOES_PARA_MUDANCA` | `3` | Classificações seguidas necessárias para registrar uma mudança de decisão (com foto nova) |
 | `AMOSTRAS_MINIMAS_DECISAO` | `2` | Classificações necessárias antes da primeira decisão |
@@ -575,10 +631,12 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `TEMPO_MEMORIA_PESSOA_SEG` | `8.0` | Por quanto tempo quem sumiu continua lembrado. Maior = menos fotos repetidas, mais risco de confundir duas pessoas |
 | `DISTANCIA_*_RASTREIO` | - | Até que distância de onde sumiu a pessoa ainda é reconhecida como a mesma |
 | `EPOCAS_TREINO` | `15` | Épocas do treinamento |
-| `PAINEL_WEB_ATIVO` | `True` | Liga ou desliga o painel web |
-| `PAINEL_WEB_HOST` | `"0.0.0.0"` | `"0.0.0.0"` = acessível na rede; `"127.0.0.1"` = só neste computador |
-| `PAINEL_WEB_PORTA` | `8080` | Porta do painel web |
-| `PAINEL_WEB_USUARIO` / `PAINEL_WEB_SENHA` | `gerente` / (veja o arquivo) | Login do painel. Troque a senha; senha vazia desliga o login |
+| `PAINEL_WEB_ATIVO` | `True` | Liga ou desliga o painel web (só até o primeiro "Aplicar" em Configurações > Painel web) |
+| `PAINEL_WEB_HOST` | `"0.0.0.0"` | `"0.0.0.0"` = acessível na rede; `"127.0.0.1"` = só neste computador (idem) |
+| `PAINEL_WEB_PORTA` | `8080` | Porta do painel web (idem) |
+| `PAINEL_WEB_USUARIO` / `PAINEL_WEB_SENHA` | `gerente` / (veja o arquivo) | Login inicial do painel (idem). Troque pela tela |
+| `PAINEL_WEB_SENHA_MINIMA` | `6` | Tamanho mínimo de uma senha nova |
+| `ITERACOES_HASH_SENHA` | `200000` | Repetições do hash da senha (mais = mais difícil de adivinhar) |
 
 ---
 
@@ -616,7 +674,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Saída esperada: `103 passed` em menos de meio minuto.
+Saída esperada: `195 passed` em menos de um minuto.
 
 | Arquivo | O que testa |
 |---|---|
@@ -624,13 +682,17 @@ Saída esperada: `103 passed` em menos de meio minuto.
 | `test_auditoria.py` | Gravar, ler, excluir linha, zerar e log de formato antigo (nada é apagado) |
 | `test_relatorio.py` | Relatório de um evento: conteúdo, foto copiada, outros eventos, texto escapado no HTML |
 | `test_preferencias.py` | Preferências salvas, arquivo corrompido, câmeras IP |
-| `test_camera.py` | Câmera IP: conexão, queda e reconexão, endereço errado, senha escondida |
+| `test_camera.py` | Câmera IP: conexão, queda e reconexão, endereço errado, senha escondida; webcam que cai e reabre sozinha |
 | `test_analisador.py` | Linha de análise completa: decisão, uma foto por pessoa, troca de setor |
-| `test_painel_web.py` | Painel web: login, somente leitura, proteção das pastas |
+| `test_painel_web.py` | Painel web: login, somente leitura, proteção das pastas, situação de cada área, imagem por área, download da planilha |
+| `test_acesso_web.py` | Painel web ajustado na tela: hash da senha, validação dos campos, ajustes salvos sem a senha, servidor aceitando a senha nova, "Aplicar" reiniciando o painel e porta em uso |
+| `test_temas.py` | Tema escuro e claro: paletas compatíveis, troca com o programa aberto, preferência salva |
+| `test_exportacao.py` | Planilha de exportação (cabeçalhos, `;`, acentos para o Excel) e carimbo das fotos de evidência |
 | `test_contrato_catraca.py` | O formato de `/api/ao-vivo` de que a catraca ESP32 depende (Wi-Fi) |
 | `test_catraca_serial.py` | Envio do status pelo cabo USB (porta falsa): formato da linha, reconexão, porta ocupada, e se o firmware entende tudo o que é enviado |
+| `test_areas.py` | Várias áreas: áreas salvas e conversão das versões antigas, coluna Área na auditoria, modelo atendendo uma área por vez, duas análises na mesma auditoria |
 | `test_modos.py` | Modos Catraca e Vigilância: textos de cada modo, conversão de nomes e logs antigos, e o modo chegando à tela, auditoria, relatório, painel web e catraca |
-| `test_janela.py` | Botões da janela: excluir linha, salvar relatório, adicionar e remover câmera IP |
+| `test_janela.py` | Botões da janela: excluir linha, salvar relatório, adicionar e remover câmera IP, visão geral, barra de áreas, tela de espera da câmera, chips dos EPIs, capturar foto, período, exportar, legendas do vídeo, selo da IA e bipe |
 
 Os testes seguem três regras:
 
@@ -649,7 +711,7 @@ No GitHub, os testes rodam sozinhos a cada envio de código (arquivo `.github/wo
 | Problema | Solução |
 |---|---|
 | **"Nenhum modelo encontrado em 'modelos/'"** | Recupere os arquivos de `modelos/` do repositório, ou colete imagens e rode `python treinar.py`. |
-| **A área de fiscalização está cinza** | O programa está usando o modelo antigo, que não distingue os EPIs. Colete imagens rotuladas e rode `python treinar.py`. |
+| **A escolha de setor e EPIs está cinza** | O programa está usando o modelo antigo, que não distingue os EPIs. Colete imagens rotuladas e rode `python treinar.py`. |
 | **Um EPI específico erra muito** | Veja a taxa de acerto dele no fim do treino e colete mais imagens desse EPI, nos dois casos (usando e sem usar) e em combinações variadas. |
 | **O treino diz que falta um caso** | Algum EPI só tem imagens "usando" ou só "sem usar". Colete o caso que falta. |
 | **Luvas nunca são reconhecidas** | As mãos precisam aparecer dentro da caixa da pessoa. Afaste-se um pouco da câmera ou aumente `MARGEM_INFERIOR_ROSTO`. |
@@ -664,7 +726,7 @@ No GitHub, os testes rodam sozinhos a cada envio de código (arquivo `.github/wo
 | **Duas pessoas diferentes contadas como uma** | O contrário: diminua `TEMPO_MEMORIA_PESSOA_SEG` ou `DISTANCIA_MAXIMA_RASTREIO`. |
 | **A caixa não aparece** | O detector precisa ver o rosto. Fique de frente para a câmera, com boa iluminação. |
 | **Status errado com frequência** | O dataset é pequeno. Colete mais imagens e treine de novo. |
-| **"Painel web indisponível (porta 8080 em uso)"** | Outro programa usa a porta, ou o `painel_web.py` está aberto. Feche-o ou mude `PAINEL_WEB_PORTA`. |
+| **"Painel web indisponível (porta 8080 em uso)"** | Outro programa usa a porta, ou o `painel_web.py` está aberto. Feche-o ou troque a porta em Configurações > Painel web. |
 | **O painel web não abre em outro aparelho** | Os dois precisam estar na mesma rede, e o Windows precisa ter permitido o Python no firewall (redes privadas). |
 | **`No module named 'tensorflow.python'`** ao instalar | Caminhos longos desativados no Windows. Em um PowerShell de administrador: `New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force`, reinicie o computador e reinstale com `pip install --force-reinstall tensorflow`. |
 | **`Could not find the DLL(s) 'msvcp140.dll'`** | Instale o Microsoft Visual C++ Redistributable: `winget install --id Microsoft.VCRedist.2015+.x64 -e`. |

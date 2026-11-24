@@ -117,3 +117,109 @@ def test_sem_camera_o_ao_vivo_avisa(painel):
 
     assert codigo == 200
     assert json.loads(corpo)["disponivel"] is False
+
+
+# ============================================================
+# VÁRIAS ÁREAS E EXPORTAÇÃO
+# ============================================================
+
+@pytest.fixture
+def painel_com_areas(auditoria):
+    """Painel com duas áreas: uma com câmera e uma pessoa negada, outra desligada."""
+
+    from safetech.nucleo.tipos import EstadoCena, PessoaObservada, StatusAcesso, StatusPessoa
+
+    negada = PessoaObservada(
+        identificador=1,
+        caixa=(10, 10, 60, 100),
+        status=StatusPessoa.NEGADO,
+        faltando=("capacete",),
+    )
+
+    estado_portaria = EstadoCena(
+        pessoas=(negada,),
+        acesso=StatusAcesso.NEGADO,
+        setor="Canteiro de obras",
+        exigidos=("capacete",),
+        modo=config.MODO_CATRACA,
+        area="Portaria",
+    )
+
+    areas = [
+        ("Portaria", np.zeros((120, 160, 3), np.uint8), estado_portaria, True),
+        ("Pátio", None, EstadoCena(modo=config.MODO_VIGILANCIA, area="Pátio"), False),
+    ]
+
+    porta = porta_livre()
+
+    servidor = ServidorWeb(auditoria, None, host="127.0.0.1", porta=porta, fonte_areas=lambda: areas)
+    servidor.iniciar()
+
+    servidor.endereco_de_teste = f"http://127.0.0.1:{porta}"
+
+    yield servidor
+
+    servidor.parar()
+
+
+def test_api_areas_resume_cada_area(painel_com_areas):
+
+    codigo, corpo = pedir(painel_com_areas, "/api/areas")
+
+    assert codigo == 200
+
+    portaria, patio = json.loads(corpo)
+
+    assert portaria["area"] == "Portaria"
+    assert portaria["titulo"] == "ACESSO NEGADO"
+    assert portaria["pessoas"] == 1 and portaria["irregulares"] == 1
+    assert portaria["comanda_catraca"] is True
+
+    assert patio["camera_ativa"] is False
+    assert patio["acesso"] == "camera_desligada"
+    assert patio["nome_modo"] == "Vigilância"
+
+
+def test_imagem_de_cada_area(painel_com_areas):
+
+    # Área com câmera: JPEG
+    codigo, corpo = pedir(painel_com_areas, "/ao-vivo.jpg?area=0")
+
+    assert codigo == 200
+    assert corpo.startswith(b"\xff\xd8")   # início de todo arquivo JPEG
+
+    # Câmera desligada, número fora da lista ou lixo: sem imagem, sem derrubar o servidor
+    assert pedir(painel_com_areas, "/ao-vivo.jpg?area=1")[0] == 503
+    assert pedir(painel_com_areas, "/ao-vivo.jpg?area=9")[0] == 503
+    assert pedir(painel_com_areas, "/ao-vivo.jpg?area=abc")[0] == 503
+
+
+def test_sem_aplicativo_a_lista_de_areas_vem_vazia(painel):
+
+    codigo, corpo = pedir(painel, "/api/areas")
+
+    assert codigo == 200
+    assert json.loads(corpo) == []
+
+
+def test_exportar_csv_baixa_o_historico(painel):
+
+    pedido = urllib.request.Request(painel.endereco_de_teste + "/exportar.csv")
+
+    credenciais = f"{config.PAINEL_WEB_USUARIO}:{config.PAINEL_WEB_SENHA}"
+    pedido.add_header("Authorization", "Basic " + base64.b64encode(credenciais.encode()).decode())
+
+    with urllib.request.urlopen(pedido, timeout=5) as resposta:
+
+        assert resposta.status == 200
+        assert "attachment" in resposta.headers["Content-Disposition"]
+
+        texto = resposta.read().decode("utf-8-sig")
+
+    assert texto.startswith("Data e hora;")
+    assert "Canteiro de obras" in texto and "Liberado" in texto
+
+
+def test_exportar_tambem_e_somente_leitura(painel):
+
+    assert pedir(painel, "/exportar.csv", metodo="POST")[0] == 405

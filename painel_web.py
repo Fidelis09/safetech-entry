@@ -13,21 +13,26 @@ Não abra os dois ao mesmo tempo: eles usam a mesma porta.
 import time
 import webbrowser
 
-from safetech import config
+from safetech.servicos import preferencias
 from safetech.servicos.auditoria import ServicoAuditoria
 from safetech.web.servidor import ServidorWeb
 
 
 def principal():
 
+    # Porta, rede, usuário e senha: os mesmos escolhidos no aplicativo
+    # (Configurações > Painel web). Aqui o painel sobe mesmo que lá esteja
+    # desligado: rodar este arquivo já é pedir o painel.
+    ajustes = preferencias.carregar_painel_web()
+
     # Sem fonte ao vivo: o painel mostra só indicadores, eventos e fotos
-    servidor = ServidorWeb(ServicoAuditoria())
+    servidor = ServidorWeb(ServicoAuditoria(), ajustes=ajustes)
 
     try:
         servidor.iniciar()
 
     except OSError:
-        print(f"A porta {config.PAINEL_WEB_PORTA} já está em uso.")
+        print(f"A porta {ajustes.porta} já está em uso.")
         print("Se o aplicativo estiver aberto, o painel já está no ar por ele.")
         return
 
@@ -36,8 +41,8 @@ def principal():
     print("Painel web do gerente (somente leitura)")
     print("Endereço:", endereco)
 
-    if config.PAINEL_WEB_SENHA:
-        print("Usuário: ", config.PAINEL_WEB_USUARIO)
+    if ajustes.exige_login:
+        print("Usuário: ", ajustes.usuario)
 
     print()
     print("Pressione Ctrl+C para encerrar.")

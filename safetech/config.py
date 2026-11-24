@@ -70,6 +70,11 @@ PASTA_IMAGENS_AUDITORIA = PASTA_AUDITORIA / "imagens"
 # para a pasta de imagens dos excluídos.
 PASTA_EXCLUIDOS = PASTA_AUDITORIA / "excluidos"
 
+# Fotos tiradas pelo botão "Capturar foto" da câmera de uma área (a
+# imagem do momento com as caixas e o carimbo de data, hora e área).
+# Não fazem parte do log: são registros avulsos do operador.
+PASTA_CAPTURAS = PASTA_AUDITORIA / "capturas"
+
 # Relatórios do botão "Salvar relatório" da auditoria: uma pasta por
 # relatório, com o relatório em HTML e a cópia da foto do evento.
 PASTA_RELATORIOS = PASTA_AUDITORIA / "relatorios"
@@ -192,6 +197,15 @@ TEMPO_LIMITE_LEITURA_IP_MS = 5000
 # Espera entre duas tentativas de reconexão quando a rede cai.
 INTERVALO_RECONEXAO_IP_SEG = 3.0
 
+# Webcam (USB) que para de responder (cabo frouxo, hub desligado):
+# True = o programa tenta reabri-la sozinho, de tempos em tempos, como
+# faz com a câmera IP. False = mostra o erro e espera o usuário clicar
+# em "Tentar novamente".
+RECONECTAR_WEBCAM = True
+
+# Espera entre duas tentativas de reabrir a webcam
+INTERVALO_RECONEXAO_WEBCAM_SEG = 2.0
+
 # Vídeo RTSP por TCP em vez de UDP: um pouco mais de atraso, mas sem
 # imagens cinzas ou borradas quando a rede perde pacotes (UDP não
 # reenvia o que se perdeu).
@@ -309,6 +323,26 @@ MODOS_ANTIGOS = {
 # Modo usado na primeira vez que o programa abre
 MODO_DETECCAO_PADRAO = MODO_CATRACA
 
+
+# ============================================================
+# ÁREAS (várias câmeras ao mesmo tempo)
+# ============================================================
+#
+# Cada ÁREA é uma câmera com a sua própria fiscalização: nome, setor,
+# EPIs exigidos e modo (catraca ou vigilância). Cada uma abre numa aba
+# da tela principal e tem a sua própria linha de análise (thread).
+#
+# A auditoria é uma só para todas: cada evento guarda de qual área veio.
+# ============================================================
+
+# Nome da primeira área (e das gravadas antes de existirem áreas)
+NOME_AREA_PADRAO = "Principal"
+
+# Limite de áreas abertas ao mesmo tempo. Cada área é uma câmera e uma
+# análise rodando juntas: com muitas, o computador não dá conta e todas
+# ficam lentas.
+MAXIMO_AREAS = 6
+
 # Textos de cada modo. "ok" é quem está com todos os EPIs exigidos;
 # "irregular" é quem não está.
 #
@@ -414,12 +448,27 @@ TAXA_MAXIMA_ANALISE_HZ = 15
 # ============================================================
 
 # Confiança mínima (0 a 1) para considerar que a pessoa ESTÁ usando
-# um equipamento. Ajustável na tela. Mais alto = mais rigoroso.
+# um equipamento. Ajustável em Configurações > Análise (o valor
+# escolhido fica salvo). Mais alto = mais rigoroso.
 LIMIAR_CONFIANCA_PADRAO = 0.80
 
+# Faixa do controle deslizante da confiança (0 a 1). Abaixo de 50%,
+# "usando" seria quase um chute; 99% é o máximo que ainda libera.
+LIMIAR_CONFIANCA_MINIMO = 0.50
+LIMIAR_CONFIANCA_MAXIMO = 0.99
+
 # De quanto em quanto tempo (segundos) cada pessoa é reclassificada.
-# Ajustável na tela.
+# Ajustável em Configurações > Análise (o valor fica salvo).
 INTERVALO_CLASSIFICACAO_PADRAO_SEG = 1.0
+
+# Faixa do controle deslizante do intervalo (segundos)
+INTERVALO_CLASSIFICACAO_MINIMO_SEG = 0.3
+INTERVALO_CLASSIFICACAO_MAXIMO_SEG = 5.0
+
+# Depois de mexer num controle deslizante, espera este tempo parado
+# antes de gravar o valor em preferencias.json. Sem isso, o arquivo
+# seria regravado dezenas de vezes enquanto o controle é arrastado.
+ESPERA_SALVAR_AJUSTES_MS = 600
 
 # Quando aparece alguém novo, as primeiras classificações são feitas
 # neste intervalo curto, para a decisão sair rápido.
@@ -445,16 +494,72 @@ CONFIRMACOES_PARA_MUDANCA = 3
 # ============================================================
 
 TITULO_JANELA = "SafeTech Entry - Reconhecimento de EPI"
+
+# Temas da tela: chave -> nome mostrado. O botão no cabeçalho alterna
+# entre eles e a escolha fica salva. As cores de cada um ficam em
+# safetech/interface/tema.py (PALETAS); o painel web tem o seu próprio
+# botão de tema, guardado no navegador de cada gerente.
+TEMAS = {"escuro": "Escuro", "claro": "Claro"}
+TEMA_PADRAO = "escuro"
+
+# Nome e frase de apresentação mostrados no cabeçalho da janela
+NOME_PRODUTO = "SafeTech Entry"
+SUBTITULO_PRODUTO = "Controle de acesso e fiscalização de EPI por visão computacional"
 TAMANHO_INICIAL_JANELA = "1360x860"
 TAMANHO_MINIMO_JANELA = (1080, 740)
+
+# Tamanho da janela de Configurações (largura, altura), em pixels a
+# 100% de escala do monitor
+TAMANHO_JANELA_CONFIGURACOES = (720, 620)
 
 # Intervalo (ms) do laço de atualização da tela. 33 ms = ~30 quadros/s
 INTERVALO_TELA_MS = 33
 
 # Máximo de linhas exibidas na tabela de auditoria (as mais recentes).
-# Os totais dos cartões continuam contando o histórico inteiro.
+# Os totais dos cartões continuam contando o período inteiro.
 MAXIMO_LINHAS_TABELA = 500
 
+# Períodos da auditoria na tela: nome -> quantos dias para trás contam
+# (0 = só hoje; None = todo o histórico). Os cartões de totais, a tabela
+# e a exportação seguem o período escolhido.
+PERIODOS_AUDITORIA = {
+    "Hoje": 0,
+    "Últimos 7 dias": 6,
+    "Últimos 30 dias": 29,
+    "Todo o histórico": None,
+}
+
+# Período escolhido quando o programa abre
+PERIODO_AUDITORIA_PADRAO = "Todo o histórico"
+
+# Exportação da auditoria (botão "Exportar CSV" e painel web). O Excel
+# em português espera ";" como separador; a marca BOM ("utf-8-sig")
+# faz ele mostrar os acentos certos ao abrir o arquivo com dois cliques.
+SEPARADOR_CSV_EXPORTACAO = ";"
+CODIFICACAO_CSV_EXPORTACAO = "utf-8-sig"
+
+# Bipe do Windows quando alguém tem o acesso NEGADO numa área em modo
+# catraca (como numa catraca de verdade). Na vigilância não toca: com
+# muita gente seria um bipe atrás do outro.
+ALERTA_SONORO_NEGADO = True
+
+# Visão geral (todas as áreas lado a lado): quantas vezes por segundo
+# cada quadro é redesenhado. Menos que o vídeo principal, porque são
+# várias imagens ao mesmo tempo e a visão serve para acompanhar, não
+# para analisar detalhes.
+QUADROS_POR_SEGUNDO_VISAO_GERAL = 8
+
+# --- Desenho sobre o vídeo e as fotos ---------------------------
+
+# Tamanho da palavra junto da caixa de cada pessoa ("OK", "NEGADO"),
+# numa imagem de 800 px de largura (cresce junto com a imagem). Abaixo
+# de ~0.45 a palavra fica difícil de ler no vídeo da tela.
+ESCALA_FONTE_ROTULO = 0.5
+
+# Carimbo nas fotos de evidência: data e hora, área, pessoa e resultado
+# gravados NA PRÓPRIA FOTO, numa faixa embaixo. Assim a foto continua
+# dizendo de quando e de onde é mesmo copiada para fora do sistema.
+CARIMBAR_EVIDENCIA = True
 
 # ============================================================
 # PAINEL WEB DO GERENTE (somente leitura)
@@ -463,6 +568,11 @@ MAXIMO_LINHAS_TABELA = 500
 # Página de acompanhamento acessível pelo navegador. Ela só MOSTRA
 # dados (status ao vivo, eventos e fotos); não existe nenhuma rota
 # que altere configurações ou apague registros.
+#
+# Ligar, porta, acesso pela rede, usuário e senha se ajustam na TELA
+# (Configurações > Painel web) e ficam salvos em preferencias.json (fora
+# do repositório; a senha só como hash). Os valores abaixo valem apenas
+# até o primeiro "Aplicar" naquela aba.
 # ============================================================
 
 # False desliga o painel web por completo
@@ -479,6 +589,19 @@ PAINEL_WEB_PORTA = 8080
 # Senha vazia ("") desliga o login.
 PAINEL_WEB_USUARIO = "gerente"
 PAINEL_WEB_SENHA = "1234"
+
+# Tamanho mínimo de uma senha nova definida na tela
+PAINEL_WEB_SENHA_MINIMA = 6
+
+# Portas aceitas na tela. Abaixo de 1024 o Windows reserva para
+# serviços do sistema.
+PAINEL_WEB_PORTA_MINIMA = 1024
+PAINEL_WEB_PORTA_MAXIMA = 65535
+
+# Quantas vezes o cálculo do hash da senha é repetido. Mais = mais
+# lento para quem tenta adivinhar senhas (e um pouco mais lento para
+# conferir o login, ~0,1 s; o servidor guarda os logins já conferidos).
+ITERACOES_HASH_SENHA = 200_000
 
 # Quantos eventos (os mais recentes) o painel web lista
 PAINEL_WEB_MAXIMO_EVENTOS = 300

@@ -181,6 +181,7 @@ def _montar_html(registro, foto, outros):
         ("Setor", registro.setor or "-"),
         ("EPIs exigidos", registro.exigidos or "nenhum"),
         ("Faltando", registro.faltando or "nada"),
+        ("Área", registro.area or "-"),
         ("Modo", modos.nome_do_modo(registro.modo)),
         ("Resultado", modos.resultado(registro.modo, registro.liberado == "SIM")),
         ("Arquivo da foto", registro.imagem or "-"),
@@ -204,7 +205,7 @@ def _montar_html(registro, foto, outros):
         bloco_outros = f"""
 <h2>Outros eventos no mesmo momento</h2>
 <table class="outros">
-<tr><th>Foto</th><th>Pessoa</th><th>Resultado</th><th>Faltando</th><th>Confiança</th></tr>
+<tr><th>Foto</th><th>Pessoa</th><th>Área</th><th>Resultado</th><th>Faltando</th><th>Confiança</th></tr>
 {linhas_outros}
 </table>"""
 
@@ -278,6 +279,7 @@ def _linha_outro(registro, foto) -> str:
     return (
         f"<tr><td>{miniatura}</td>"
         f"<td><b>{e(registro.pessoa)}</b></td>"
+        f"<td>{e(registro.area or '-')}</td>"
         f'<td class="{classe}">{e(modos.resultado(registro.modo, registro.liberado == "SIM"))}</td>'
         f"<td>{e(registro.faltando or 'nada')}</td>"
         f"<td>{_lista_confiancas(registro)}</td></tr>"
