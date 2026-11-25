@@ -174,15 +174,6 @@ class ServidorWeb:
 
         textos = modos.textos(estado.modo)
 
-        # Título da faixa já no texto do modo, para a página não
-        # precisar saber o que é "liberado" na catraca ou na vigilância
-        titulos = {
-            "liberado": textos["faixa_ok"],
-            "negado": textos["faixa_irregular"],
-            "analisando": "ANALISANDO",
-            "sem_pessoas": "AGUARDANDO",
-        }
-
         return {
             # False quando o painel roda sem o aplicativo (só histórico)
             "disponivel": self._fonte_ao_vivo is not None,
@@ -194,7 +185,9 @@ class ServidorWeb:
             # Área (câmera) mostrada: a que comanda a catraca, ou a primeira
             "area": estado.area,
             "nome_modo": modos.nome_do_modo(estado.modo),
-            "titulo": titulos[estado.acesso.value],
+            # Título da faixa já no texto do modo, para a página não
+            # precisar saber o que é "liberado" na catraca ou na vigilância
+            "titulo": modos.titulo_da_situacao(estado.modo, estado.acesso),
             "lugar": textos["lugar"],
             # O que está sendo fiscalizado (o painel só mostra; quem
             # escolhe o setor é o operador, no aplicativo)
@@ -273,15 +266,6 @@ class ServidorWeb:
 
         for indice, (nome, frame, estado, comanda_catraca) in enumerate(self._ler_areas()):
 
-            textos = modos.textos(estado.modo)
-
-            titulos = {
-                "liberado": textos["faixa_ok"],
-                "negado": textos["faixa_irregular"],
-                "analisando": "ANALISANDO",
-                "sem_pessoas": "AGUARDANDO",
-            }
-
             camera_ativa = frame is not None
 
             areas.append({
@@ -291,7 +275,7 @@ class ServidorWeb:
                 "nome_modo": modos.nome_do_modo(estado.modo),
                 "camera_ativa": camera_ativa,
                 "acesso": estado.acesso.value if camera_ativa else "camera_desligada",
-                "titulo": titulos[estado.acesso.value] if camera_ativa else "CÂMERA DESLIGADA",
+                "titulo": modos.titulo_da_situacao(estado.modo, estado.acesso) if camera_ativa else "CÂMERA DESLIGADA",
                 "setor": estado.setor,
                 "pessoas": len(estado.pessoas),
                 "irregulares": sum(1 for pessoa in estado.pessoas if pessoa.status is StatusPessoa.NEGADO),

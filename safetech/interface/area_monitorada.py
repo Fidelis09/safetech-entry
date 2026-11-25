@@ -245,6 +245,14 @@ class AreaMonitorada:
         if self.analisador is None:
             return ("CARREGANDO", "Preparando o modelo de IA...", CORES["neutro"])
 
+        if self.analisador.reiniciando:
+            return (
+                "REINICIANDO A ANÁLISE",
+                f"Erro inesperado: {self.analisador.erro}. Recomeçando sozinha em instantes "
+                "(detalhes em logs/safetech.log).",
+                CORES["alerta"],
+            )
+
         if self.analisador.erro:
             return ("ERRO NA ANÁLISE", self.analisador.erro, CORES["perigo"])
 
@@ -356,7 +364,7 @@ def descrever_acesso(estado: EstadoCena):
     if estado.acesso is StatusAcesso.LIBERADO:
 
         return (
-            textos["faixa_ok"],
+            modos.titulo_da_situacao(estado.modo, estado.acesso),
             f"{total} {plural} {textos['lugar']}, todas com os EPIs exigidos.\n{exigencia}",
             CORES["sucesso"],
         )
@@ -376,7 +384,7 @@ def descrever_acesso(estado: EstadoCena):
         )
 
         return (
-            textos["faixa_irregular"],
+            modos.titulo_da_situacao(estado.modo, estado.acesso),
             f"{len(negadas)} de {total} {plural} sem EPI exigido. Faltando: {faltas}\n{exigencia}",
             CORES["perigo"],
         )
@@ -384,13 +392,13 @@ def descrever_acesso(estado: EstadoCena):
     if estado.acesso is StatusAcesso.ANALISANDO:
 
         return (
-            "ANALISANDO",
+            modos.titulo_da_situacao(estado.modo, estado.acesso),
             f"{total} {plural} {textos['lugar']}, verificando os equipamentos...\n{exigencia}",
             CORES["alerta"],
         )
 
     return (
-        "AGUARDANDO",
+        modos.titulo_da_situacao(estado.modo, StatusAcesso.SEM_PESSOAS),
         f"Nenhuma pessoa {textos['lugar']}.\n{exigencia}",
         CORES["neutro"],
     )

@@ -51,6 +51,31 @@ def resultado(modo, conforme) -> str:
     return textos(modo)[chave]
 
 
+def titulo_da_situacao(modo, acesso) -> str:
+    """
+    Título da faixa de status para a situação da cena, no texto do modo:
+
+        liberado    -> "ACESSO LIBERADO" (catraca) / "EM CONFORMIDADE" (vigilância)
+        negado      -> "ACESSO NEGADO"   (catraca) / "NÃO CONFORME"    (vigilância)
+        analisando  -> "ANALISANDO"
+        sem_pessoas -> "AGUARDANDO"
+
+    acesso -> StatusAcesso ou o valor dele em texto ("liberado"...).
+    Usado pela tela e pelo painel web: o título é escrito num lugar só.
+    """
+
+    chaves = {
+        "liberado": "faixa_ok",
+        "negado": "faixa_irregular",
+        "analisando": "faixa_analisando",
+        "sem_pessoas": "faixa_sem_pessoas",
+    }
+
+    valor = getattr(acesso, "value", acesso)
+
+    return textos(modo)[chaves[valor]]
+
+
 def eh_vigilancia(modo) -> bool:
 
     return modo_valido(modo) == config.MODO_VIGILANCIA

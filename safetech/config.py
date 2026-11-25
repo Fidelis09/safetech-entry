@@ -79,6 +79,18 @@ PASTA_CAPTURAS = PASTA_AUDITORIA / "capturas"
 # relatório, com o relatório em HTML e a cópia da foto do evento.
 PASTA_RELATORIOS = PASTA_AUDITORIA / "relatorios"
 
+# Registro de erros e acontecimentos (logs/safetech.log). Quando o
+# arquivo passa do tamanho máximo, vira safetech.log.1 e um novo começa;
+# ficam guardados os últimos QUANTIDADE_LOGS_GUARDADOS.
+PASTA_LOGS = RAIZ / "logs"
+NOME_ARQUIVO_LOG = "safetech.log"
+TAMANHO_MAXIMO_LOG_BYTES = 1_000_000
+QUANTIDADE_LOGS_GUARDADOS = 5
+
+# O que vai para o arquivo: "INFO" (acontecimentos e erros) ou
+# "DEBUG" (muito mais detalhe, para investigar um problema).
+NIVEL_LOG = "INFO"
+
 # Largura máxima (em pixels) da página e da foto no relatório HTML.
 # A foto em tamanho real fica na pasta; isto só limita a exibição.
 LARGURA_FOTO_RELATORIO = 960
@@ -347,7 +359,8 @@ MAXIMO_AREAS = 6
 # "irregular" é quem não está.
 #
 #   resultado_*  -> tabela de auditoria, relatório e painel web
-#   faixa_*      -> faixa de status grande da tela
+#   faixa_*      -> faixa de status grande da tela e painel web
+#                   (ok, irregular, analisando e sem ninguém)
 #   palavra_*    -> palavra desenhada no vídeo, junto da caixa (sem
 #                   acento: a fonte do OpenCV não tem acentos)
 TEXTOS_POR_MODO = {
@@ -358,6 +371,8 @@ TEXTOS_POR_MODO = {
         "faixa_irregular": "ACESSO NEGADO",
         "palavra_ok": "OK",
         "palavra_irregular": "NEGADO",
+        "faixa_analisando": "ANALISANDO",
+        "faixa_sem_pessoas": "AGUARDANDO",
         "lugar": "na frente da câmera",
     },
     MODO_VIGILANCIA: {
@@ -367,6 +382,8 @@ TEXTOS_POR_MODO = {
         "faixa_irregular": "NÃO CONFORME",
         "palavra_ok": "OK",
         "palavra_irregular": "SEM EPI",
+        "faixa_analisando": "ANALISANDO",
+        "faixa_sem_pessoas": "AGUARDANDO",
         "lugar": "na área",
     },
 }
@@ -481,6 +498,23 @@ TAMANHO_HISTORICO_DECISAO = 5
 
 # Quantas classificações são necessárias antes da primeira decisão
 AMOSTRAS_MINIMAS_DECISAO = 2
+
+# --- Reinício automático da análise ------------------------------
+#
+# Se a análise de uma área quebrar (um erro inesperado no detector ou
+# no modelo), ela não para de vez: espera um pouco e recomeça sozinha.
+# Só desiste depois de várias falhas SEGUIDAS, para não ficar presa num
+# erro que sempre se repete (aí o erro fica na tela e no log).
+
+# Espera entre a falha e a nova tentativa
+ESPERA_REINICIO_ANALISE_SEG = 3.0
+
+# Falhas seguidas toleradas antes de desistir
+MAXIMO_REINICIOS_ANALISE = 5
+
+# Se a análise rodou bem por este tempo antes de falhar, a falha conta
+# como nova (a contagem de falhas seguidas recomeça do zero)
+TEMPO_ESTAVEL_ANALISE_SEG = 60.0
 
 # Quantas classificações SEGUIDAS precisam discordar da decisão já
 # registrada para a mudança ir para a auditoria (com foto nova). Evita

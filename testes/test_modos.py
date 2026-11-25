@@ -228,18 +228,18 @@ def estado_com_uma_irregular(modo):
 
 def test_faixa_de_status_em_cada_modo():
 
-    from safetech.interface.janela_principal import JanelaPrincipal
+    from safetech.interface.area_monitorada import descrever_acesso
 
-    titulo, detalhe, _ = JanelaPrincipal._descrever_acesso(estado_com_uma_irregular(config.MODO_CATRACA))
+    titulo, detalhe, _ = descrever_acesso(estado_com_uma_irregular(config.MODO_CATRACA))
 
     assert titulo == "ACESSO NEGADO"
 
-    titulo, detalhe, _ = JanelaPrincipal._descrever_acesso(estado_com_uma_irregular(config.MODO_VIGILANCIA))
+    titulo, detalhe, _ = descrever_acesso(estado_com_uma_irregular(config.MODO_VIGILANCIA))
 
     assert titulo == "NÃO CONFORME"
     assert "LIBERADO" not in titulo and "NEGADO" not in titulo
 
-    titulo, detalhe, _ = JanelaPrincipal._descrever_acesso(
+    titulo, detalhe, _ = descrever_acesso(
         EstadoCena(pessoas=(pessoa(1, StatusPessoa.LIBERADO),), acesso=StatusAcesso.LIBERADO, modo=config.MODO_VIGILANCIA)
     )
 

@@ -18,6 +18,9 @@ import pytest
 
 from safetech import config
 from safetech.interface import janela_principal
+from safetech.interface import controlador_catraca
+from safetech.interface import controlador_cameras
+from safetech.interface import controlador_areas
 from safetech.nucleo.tipos import ResultadoEPI
 from safetech.servicos import preferencias
 from testes.falsos import CameraParada
@@ -145,13 +148,13 @@ class CatracaFalsa:
 def test_catraca_aparece_na_barra_de_status_e_para_ao_fechar(raiz, sem_ia, monkeypatch):
 
     monkeypatch.setattr(config, "CATRACA_SERIAL_ATIVA", True)
-    monkeypatch.setattr(janela_principal, "CatracaSerial", CatracaFalsa)
+    monkeypatch.setattr(controlador_catraca, "CatracaSerial", CatracaFalsa)
 
     tela = janela_principal.JanelaPrincipal(raiz, 1.0, camera=CameraParada())
 
     raiz.update()
 
-    catraca = tela._catraca
+    catraca = tela.catraca.serial
 
     assert catraca.iniciada
     assert tela._rotulo_catraca.cget("text") == "Catraca: COM3 conectada"
@@ -159,7 +162,7 @@ def test_catraca_aparece_na_barra_de_status_e_para_ao_fechar(raiz, sem_ia, monke
     # O texto acompanha o que a catraca informa
     catraca.situacao = "Catraca: cabo desconectado, procurando..."
 
-    tela._atualizar_catraca()
+    tela.catraca.atualizar()
 
     assert tela._rotulo_catraca.cget("text") == "Catraca: cabo desconectado, procurando..."
 
@@ -171,7 +174,7 @@ def test_catraca_aparece_na_barra_de_status_e_para_ao_fechar(raiz, sem_ia, monke
 def test_sem_catraca_ligada_nada_e_criado(janela):
 
     # No conftest, CATRACA_SERIAL_ATIVA é False
-    assert janela._catraca is None
+    assert janela.catraca.serial is None
 
 
 # ============================================================
@@ -198,9 +201,9 @@ def test_adicionar_camera_ip(janela, monkeypatch):
 
     preferencias.salvar_cameras_ip([])
 
-    monkeypatch.setattr(janela_principal, "pedir_camera_ip", lambda pai, sugerido: ("Portaria", ENDERECO))
+    monkeypatch.setattr(controlador_cameras, "pedir_camera_ip", lambda pai, sugerido: ("Portaria", ENDERECO))
 
-    janela._adicionar_camera_ip()
+    janela.cameras.adicionar_ip()
 
     painel = janela._configuracoes
 
@@ -221,10 +224,10 @@ def test_remover_camera_ip_volta_para_a_webcam(janela, monkeypatch):
 
     preferencias.salvar_cameras_ip([])
 
-    monkeypatch.setattr(janela_principal, "pedir_camera_ip", lambda pai, sugerido: ("Portaria", ENDERECO))
+    monkeypatch.setattr(controlador_cameras, "pedir_camera_ip", lambda pai, sugerido: ("Portaria", ENDERECO))
 
-    janela._adicionar_camera_ip()
-    janela._remover_camera_ip(ENDERECO)
+    janela.cameras.adicionar_ip()
+    janela.cameras.remover_ip(ENDERECO)
 
     assert preferencias.carregar_cameras_ip() == []
     assert janela._camera.fonte == 0  # a webcam que estava em uso antes
@@ -307,10 +310,10 @@ def test_marcar_epi_na_tela_principal_vira_personalizado(janela):
 def test_coleta_usa_os_rotulos_marcados_nas_configuracoes(janela, monkeypatch):
 
     salvos = []
-    monkeypatch.setattr(janela, "_salvar_imagem", salvos.append)
+    monkeypatch.setattr(janela.coleta, "salvar_imagem", salvos.append)
 
     configuracoes = janela._configuracoes
-    configuracoes._ao_salvar_imagem = janela._salvar_imagem
+    configuracoes._ao_salvar_imagem = janela.coleta.salvar_imagem
 
     configuracoes._usando["capacete"].set(True)
     configuracoes.salvar_imagem()
@@ -343,24 +346,23 @@ def criar_area(janela, monkeypatch):
 
     def criar(nome, fonte=0):
 
-        monkeypatch.setattr(
-            janela_principal, "pedir_area", lambda *args, **kwargs: (nome, fonte)
+        monkeypatch.setattr(controlador_areas, "pedir_area", lambda *args, **kwargs: (nome, fonte)
         )
 
-        janela._nova_area()
+        janela.areas.nova()
 
-        return janela._area_atual
+        return janela.areas.atual
 
     return criar
 
 
 def test_comeca_com_uma_area_que_comanda_a_catraca(janela):
 
-    assert [area.nome for area in janela._areas] == [config.NOME_AREA_PADRAO]
-    assert janela._area_da_catraca() is janela._areas[0]
+    assert [area.nome for area in janela.areas.lista] == [config.NOME_AREA_PADRAO]
+    assert janela.areas.da_catraca() is janela.areas.lista[0]
 
     # Aba da área (com a marca da catraca) e a aba "+ Nova área"
-    abas = [janela._caderno.tab(aba, "text") for aba in janela._caderno.tabs()]
+    abas = [janela.areas.caderno.tab(aba, "text") for aba in janela.areas.caderno.tabs()]
 
     assert abas[0].startswith(config.NOME_AREA_PADRAO) and "catraca" in abas[0]
     assert "Nova área" in abas[-1]
@@ -368,19 +370,19 @@ def test_comeca_com_uma_area_que_comanda_a_catraca(janela):
 
 def test_nova_area_ganha_aba_e_fiscalizacao_propria(janela, criar_area):
 
-    principal = janela._areas[0]
+    principal = janela.areas.lista[0]
 
     nova = criar_area("Laboratório", fonte=2)
 
-    assert len(janela._areas) == 2
-    assert janela._area_atual is nova
+    assert len(janela.areas.lista) == 2
+    assert janela.areas.atual is nova
     assert nova.camera.fonte == 2
 
     # A nova aba fica antes de "+ Nova área"
-    abas = janela._caderno.tabs()
+    abas = janela.areas.caderno.tabs()
 
     assert abas[1] == str(nova.painel)
-    assert abas[-1] == str(janela._aba_nova)
+    assert abas[-1] == str(janela.areas.aba_nova)
 
     # Fiscalização independente: mudar uma não muda a outra
     nova.painel._setor.set("Laboratório")
@@ -405,7 +407,7 @@ def test_trocar_de_aba_muda_a_area_das_configuracoes(janela, criar_area):
 
     assert janela._configuracoes._nome_da_area.get() == "Pátio"
 
-    janela._selecionar_area(janela._areas[0])
+    janela.areas.selecionar(janela.areas.lista[0])
 
     assert janela._configuracoes._nome_da_area.get() == config.NOME_AREA_PADRAO
     assert janela._configuracoes._nome_da_camera.get() == "Câmera 0"
@@ -413,53 +415,53 @@ def test_trocar_de_aba_muda_a_area_das_configuracoes(janela, criar_area):
 
 def test_so_uma_area_comanda_a_catraca(janela, criar_area):
 
-    principal = janela._areas[0]
+    principal = janela.areas.lista[0]
     nova = criar_area("Portaria", fonte=2)
 
     # A área aberta (nova) passa a comandar: a outra é desmarcada
-    janela._mudar_controle_catraca(True)
+    janela.areas.mudar_controle_catraca(True)
 
     assert nova.dados.controla_catraca and not principal.dados.controla_catraca
-    assert janela._area_da_catraca() is nova
-    assert "catraca" in janela._caderno.tab(nova.painel, "text")
-    assert "catraca" not in janela._caderno.tab(principal.painel, "text")
+    assert janela.areas.da_catraca() is nova
+    assert "catraca" in janela.areas.caderno.tab(nova.painel, "text")
+    assert "catraca" not in janela.areas.caderno.tab(principal.painel, "text")
 
     # Sem nenhuma marcada, a catraca recebe "vigilância" (fica fechada)
-    janela._mudar_controle_catraca(False)
+    janela.areas.mudar_controle_catraca(False)
 
-    _, estado = janela._ler_para_catraca()
+    _, estado = janela.catraca.ler_para_catraca()
 
     assert estado.modo == config.MODO_VIGILANCIA
 
 
 def test_renomear_area(janela, monkeypatch):
 
-    monkeypatch.setattr(janela_principal, "pedir_area", lambda *args, **kwargs: ("Entrada", None))
+    monkeypatch.setattr(controlador_areas, "pedir_area", lambda *args, **kwargs: ("Entrada", None))
 
-    janela._renomear_area()
+    janela.areas.renomear()
 
-    area = janela._areas[0]
+    area = janela.areas.lista[0]
 
     assert area.nome == "Entrada"
     assert area.parametros.area == "Entrada"
-    assert janela._caderno.tab(area.painel, "text").startswith("Entrada")
+    assert janela.areas.caderno.tab(area.painel, "text").startswith("Entrada")
     assert preferencias.carregar_areas()[0].nome == "Entrada"
 
 
 def test_remover_area_nao_remove_a_ultima(janela, criar_area):
 
     # Com uma área só, nada acontece
-    janela._remover_area()
+    janela.areas.remover()
 
-    assert len(janela._areas) == 1
+    assert len(janela.areas.lista) == 1
 
     criar_area("Pátio", fonte=3)
 
-    janela._remover_area()   # confirmação respondida "sim" pela fixture
+    janela.areas.remover()   # confirmação respondida "sim" pela fixture
 
-    assert [area.nome for area in janela._areas] == [config.NOME_AREA_PADRAO]
-    assert janela._area_atual is janela._areas[0]
-    assert len(janela._caderno.tabs()) == 2   # a área e "+ Nova área"
+    assert [area.nome for area in janela.areas.lista] == [config.NOME_AREA_PADRAO]
+    assert janela.areas.atual is janela.areas.lista[0]
+    assert len(janela.areas.caderno.tabs()) == 2   # a área e "+ Nova área"
     assert [a.nome for a in preferencias.carregar_areas()] == [config.NOME_AREA_PADRAO]
 
 
@@ -470,7 +472,7 @@ def test_limite_de_areas(janela, criar_area, monkeypatch):
     criar_area("Segunda", fonte=2)
     criar_area("Terceira", fonte=3)
 
-    assert len(janela._areas) == 2
+    assert len(janela.areas.lista) == 2
     assert "Limite" in janela._rotulo_aviso.cget("text")
 
 
@@ -481,7 +483,7 @@ def test_confianca_vale_para_todas_as_areas(janela, criar_area):
     janela._configuracoes._limiar.set(70)
     janela._configuracoes._ao_mover_deslizante()
 
-    for area in janela._areas:
+    for area in janela.areas.lista:
         assert area.parametros.limiar_confianca == pytest.approx(0.70)
 
     assert nova.parametros.limiar_confianca == pytest.approx(0.70)
@@ -498,12 +500,12 @@ def test_areas_salvas_voltam_ao_abrir(raiz, sem_ia, monkeypatch):
 
     try:
 
-        assert [area.nome for area in tela._areas] == ["Portaria", "Pátio"]
-        assert tela._areas[1].parametros.setor == "Área de circulação"
-        assert tela._area_da_catraca().nome == "Portaria"
+        assert [area.nome for area in tela.areas.lista] == ["Portaria", "Pátio"]
+        assert tela.areas.lista[1].parametros.setor == "Área de circulação"
+        assert tela.areas.da_catraca().nome == "Portaria"
 
         # A câmera das outras áreas é criada mas NÃO é ligada
-        assert tela._areas[1].camera.estado.value == "parada"
+        assert tela.areas.lista[1].camera.estado.value == "parada"
 
     finally:
         tela._ao_fechar()
@@ -536,38 +538,38 @@ def test_legenda_do_video_tem_area_resolucao_e_pessoas():
 def test_visao_geral_so_com_duas_areas(janela, criar_area):
 
     # Com uma área só, o botão fica desativado
-    assert janela._botao_visao_geral.instate(["disabled"])
+    assert janela.areas.botao_visao_geral.instate(["disabled"])
 
     criar_area("Portaria", fonte=2)
 
-    assert not janela._botao_visao_geral.instate(["disabled"])
+    assert not janela.areas.botao_visao_geral.instate(["disabled"])
 
     # Ligar mostra um quadro por área, no lugar das abas
-    janela._visao_geral_ativa.set(True)
-    janela._ao_alternar_visao_geral()
+    janela.areas.visao_geral_ativa.set(True)
+    janela.areas.ao_alternar_visao_geral()
     janela._raiz.update()
 
-    quadros = janela._visao_geral.quadros
+    quadros = janela.areas.visao_geral.quadros
 
     assert [quadro.area.nome for quadro in quadros] == [config.NOME_AREA_PADRAO, "Portaria"]
-    assert not janela._caderno.winfo_ismapped()
+    assert not janela.areas.caderno.winfo_ismapped()
 
     # Sem a IA carregada, cada quadro diz que está carregando
-    janela._visao_geral.atualizar()
+    janela.areas.visao_geral.atualizar()
 
     assert quadros[0].etiqueta() == "CARREGANDO"
 
     # Clicar num quadro abre a aba daquela área e sai da visão geral
-    janela._abrir_area_da_visao_geral(janela._areas[0])
+    janela.areas.abrir_da_visao_geral(janela.areas.lista[0])
 
-    assert janela._area_atual is janela._areas[0]
-    assert not janela._visao_geral_ativa.get()
+    assert janela.areas.atual is janela.areas.lista[0]
+    assert not janela.areas.visao_geral_ativa.get()
 
     # Removendo a segunda área, a visão geral volta a ficar desativada
-    janela._selecionar_area(janela._areas[1])
-    janela._remover_area()
+    janela.areas.selecionar(janela.areas.lista[1])
+    janela.areas.remover()
 
-    assert janela._botao_visao_geral.instate(["disabled"])
+    assert janela.areas.botao_visao_geral.instate(["disabled"])
 
 
 def test_melhor_grade_aproveita_o_formato_do_painel():
@@ -672,9 +674,9 @@ def test_bipe_so_para_negado_no_modo_catraca(janela, monkeypatch):
     from safetech.servicos.analisador import Analisador
 
     bipes = []
-    monkeypatch.setattr(janela, "_alertar_negado", lambda: bipes.append(1))
+    monkeypatch.setattr(janela.eventos, "alertar_negado", lambda: bipes.append(1))
 
-    area = janela._areas[0]
+    area = janela.areas.lista[0]
     area.analisador = Analisador.__new__(Analisador)
     area.analisador.registros_novos = queue.Queue()
 
@@ -682,14 +684,14 @@ def test_bipe_so_para_negado_no_modo_catraca(janela, monkeypatch):
 
     # Negado na vigilância: registra, mas não bipa
     area.analisador.registros_novos.put(replace(negado, modo=config.MODO_VIGILANCIA))
-    janela._receber_registros()
+    janela.eventos.receber()
 
     assert bipes == []
 
     # Dois negados na catraca de uma vez: um bipe só
     area.analisador.registros_novos.put(negado)
     area.analisador.registros_novos.put(negado)
-    janela._receber_registros()
+    janela.eventos.receber()
 
     assert bipes == [1]
 
@@ -702,10 +704,10 @@ def test_bipe_so_para_negado_no_modo_catraca(janela, monkeypatch):
 
 def test_barra_tem_uma_pilula_por_area_e_abre_a_area(janela, criar_area):
 
-    barra = janela._barra_areas
+    barra = janela.areas.barra
 
     nova = criar_area("Portaria", fonte=2)
-    principal = janela._areas[0]
+    principal = janela.areas.lista[0]
 
     assert list(barra._pilulas) == [str(principal.painel), str(nova.painel)]
     assert "Portaria" in barra._pilulas[str(nova.painel)].cget("text")
@@ -713,31 +715,31 @@ def test_barra_tem_uma_pilula_por_area_e_abre_a_area(janela, criar_area):
     # A área à vista fica marcada; clicar em outra pílula a abre
     assert barra._escolhida.get() == str(nova.painel)
 
-    janela._ao_escolher_na_barra(str(principal.painel))
+    janela.areas.ao_escolher_na_barra(str(principal.painel))
 
-    assert janela._area_atual is principal
+    assert janela.areas.atual is principal
     assert barra._escolhida.get() == str(principal.painel)
 
     # Visão geral: nenhuma pílula marcada; voltar a uma área marca de novo
-    janela._visao_geral_ativa.set(True)
-    janela._ao_alternar_visao_geral()
+    janela.areas.visao_geral_ativa.set(True)
+    janela.areas.ao_alternar_visao_geral()
 
     assert barra._escolhida.get() == ""
 
-    janela._abrir_area_da_visao_geral(nova)
+    janela.areas.abrir_da_visao_geral(nova)
 
     assert barra._escolhida.get() == str(nova.painel)
 
 
 def test_ponto_da_barra_mostra_a_situacao_da_area(janela):
 
-    area = janela._areas[0]
+    area = janela.areas.lista[0]
 
-    janela._proxima_conferencia_pontos = 0.0
-    janela._atualizar_pontos_da_barra()
+    janela.areas._proxima_conferencia_pontos = 0.0
+    janela.areas.atualizar_pontos_da_barra()
 
     # Sem a IA carregada (fixture sem_ia), a área está "carregando": cinza
-    assert janela._barra_areas.cor(str(area.painel)) == area.resumo_status()[2]
+    assert janela.areas.barra.cor(str(area.painel)) == area.resumo_status()[2]
 
 
 def test_pagina_da_camera_mostra_a_camera_e_a_tela_de_espera(janela):
@@ -770,7 +772,7 @@ def test_chips_dos_epis_marcam_o_exigido(janela):
 
 def test_capturar_foto_sem_camera_so_avisa(janela):
 
-    janela._capturar_foto(janela._areas[0])
+    janela.cameras.capturar_foto(janela.areas.lista[0])
 
     assert "Ligue a câmera" in janela._rotulo_aviso.cget("text")
 
@@ -790,11 +792,11 @@ def test_capturar_foto_salva_imagem_carimbada(janela):
         controla_catraca=False,
     )
 
-    area = janela._criar_area(dados, camera=CameraFalsa())
+    area = janela.areas.criar(dados, camera=CameraFalsa())
 
-    janela._capturar_foto(area)
+    janela.cameras.capturar_foto(area)
 
-    caminho = janela._ultima_captura
+    caminho = janela.cameras.ultima_captura
 
     assert caminho.parent == config.PASTA_CAPTURAS
     assert "Patio" in caminho.name
@@ -840,7 +842,7 @@ def linhas_da_tabela(janela):
 
 def test_auditoria_mostra_so_a_area_aberta_e_tudo_na_visao_geral(janela, criar_area):
 
-    principal = janela._areas[0]
+    principal = janela.areas.lista[0]
     portaria = criar_area("Portaria", fonte=2)
 
     registrar_na_area(janela, 1, principal.nome)
@@ -856,7 +858,7 @@ def test_auditoria_mostra_so_a_area_aberta_e_tudo_na_visao_geral(janela, criar_a
     assert "Portaria" in painel._rotulo_area.cget("text")
 
     # Abrir a outra área troca os eventos
-    janela._selecionar_area(principal)
+    janela.areas.selecionar(principal)
 
     assert linhas_da_tabela(janela) == ["P001"]
     assert painel._valor_total.cget("text") == "1"
@@ -867,8 +869,8 @@ def test_auditoria_mostra_so_a_area_aberta_e_tudo_na_visao_geral(janela, criar_a
     assert linhas_da_tabela(janela) == ["P001"]
 
     # Visão geral: todas as áreas
-    janela._visao_geral_ativa.set(True)
-    janela._ao_alternar_visao_geral()
+    janela.areas.visao_geral_ativa.set(True)
+    janela.areas.ao_alternar_visao_geral()
 
     assert painel.area is None
     assert len(linhas_da_tabela(janela)) == 4
@@ -879,7 +881,7 @@ def test_auditoria_mostra_so_a_area_aberta_e_tudo_na_visao_geral(janela, criar_a
     assert len(painel.registros_filtrados()) == 4
 
     # Clicar num quadro volta a filtrar pela área dele
-    janela._abrir_area_da_visao_geral(portaria)
+    janela.areas.abrir_da_visao_geral(portaria)
 
     assert painel.area == "Portaria"
     assert len(painel.registros_filtrados()) == 3
@@ -887,7 +889,7 @@ def test_auditoria_mostra_so_a_area_aberta_e_tudo_na_visao_geral(janela, criar_a
 
 def test_area_sem_eventos_avisa_na_tabela(janela, criar_area):
 
-    registrar_na_area(janela, 1, janela._areas[0].nome)
+    registrar_na_area(janela, 1, janela.areas.lista[0].nome)
 
     criar_area("Pátio", fonte=3)
 
@@ -901,8 +903,8 @@ def test_area_sem_eventos_avisa_na_tabela(janela, criar_area):
 
 def test_renomear_area_aberta_acompanha_na_auditoria(janela, monkeypatch):
 
-    monkeypatch.setattr(janela_principal, "pedir_area", lambda *args, **kwargs: ("Entrada", None))
+    monkeypatch.setattr(controlador_areas, "pedir_area", lambda *args, **kwargs: ("Entrada", None))
 
-    janela._renomear_area()
+    janela.areas.renomear()
 
     assert janela._painel_auditoria.area == "Entrada"

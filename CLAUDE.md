@@ -36,7 +36,8 @@ python -m pytest       # testes automatizados (pasta testes/, ~35 s)
 - `safetech/config.py` — toda a configuração.
 - `safetech/nucleo/` — sem câmera e sem tela: detectores (`detector.py` escolhe entre `detector_rosto.py` e `detector_corpo.py`), `rastreador.py`, `classificador.py`, `decisao.py`, `anotacao.py`, `tipos.py`, `epis.py`, `modos.py` (textos de cada modo).
 - `safetech/servicos/` — `camera.py` (thread; webcam por número ou câmera IP por endereço), `analisador.py` (thread: detectar → rastrear → classificar → decidir → auditar), `auditoria.py`, `dataset.py`, `importacao.py`, `preferencias.py`, `relatorio.py` (relatório HTML de uma linha da auditoria), `catraca_serial.py` (thread que envia o status ao ESP32 pelo cabo USB).
-- `safetech/interface/` — Tkinter. Os painéis só exibem e chamam funções da `janela_principal.py`; não conhecem câmera nem modelo.
+- `safetech/interface/` — Tkinter. Os painéis só exibem e chamam funções recebidas; não conhecem câmera nem modelo.
+  - **Controladores**: a `janela_principal.py` só monta a tela (cabeçalho, divisor, rodapé), cuida de tema, atalhos, ciclo e avisos, e liga os controladores, um por assunto: `ia` (`controlador_ia.CargaIA`), `areas` (`controlador_areas`: áreas, barra, páginas, visão geral, fiscalização, confiança/intervalo), `cameras` (`controlador_cameras`), `eventos` (`controlador_auditoria`), `coleta` (`controlador_coleta`), `painel_web` (`controlador_painel_web`), `catraca` (`controlador_catraca`). Eles usam da janela só as propriedades públicas `raiz`, `escala`, `auditoria`, `configuracoes`, `painel_auditoria` e `avisar()`. Funcionalidade nova vai no controlador do assunto, não na janela.
   - **Várias áreas**: cada área (`area_monitorada.py`: dados + câmera + `ParametrosAnalise` + `Analisador` + aba) é uma aba do `ttk.Notebook` à esquerda; a última aba "+ Nova área" cria outra (`dialogo_area.py`). Só a área à vista é desenhada; todas analisam. `janela._camera`, `._parametros`, `._painel_monitoramento`, `._analisador` são da área à vista. A navegação é a `BarraAreas` (`componentes.py`: pílulas com ponto da situação, "Visão geral" e "+ Nova área"); o `ttk.Notebook` só guarda as páginas (estilo `SemAbas.TNotebook`, abas escondidas). Com 2+ áreas, "Visão geral" troca as páginas por `painel_visao_geral.py` (todas lado a lado; clique abre a área). A auditoria acompanha: área aberta = só os eventos dela (`PainelAuditoria.definir_area(nome)`); visão geral = todas (`definir_area(None)`).
   - **Temas escuro e claro**: `tema.PALETAS` (mesmas chaves nos dois; cores repetidas num tema também repetidas no outro, conferido em `test_temas.py`). Usar sempre `CORES["chave"]`, nunca cor escrita (exceto `"white"` sobre cores de status). `tema.trocar_tema` refaz os estilos e repinta os componentes tk trocando cor antiga pela nova; o que guarda cor por conta própria (tags da Treeview, imagens) precisa de um método para refazer (ex.: `PainelAuditoria.aplicar_cores`).
   - `painel_monitoramento.py` = a aba de uma área: vídeo, status, setor, modo, **EPIs exigidos** e botão da câmera.
@@ -48,6 +49,13 @@ python -m pytest       # testes automatizados (pasta testes/, ~35 s)
 - `catraca_esp32/` — firmware Arduino (C++) da catraca de demonstração. Recebe o status por dois caminhos: cabo USB (linhas `ST|acesso|negadas|total|faltando`, enviadas por `servicos/catraca_serial.py`) e Wi-Fi (lê `/api/ao-vivo`, só GET). O cabo tem prioridade. Ajustes ficam em `config.h` (fora do git; modelo em `config_exemplo.h`). Se mudar o formato da linha ou do `/api/ao-vivo`, atualizar o `.ino` e os testes `test_catraca_serial.py` / `test_contrato_catraca.py`.
 - Compilar o firmware: a Arduino IDE traz o `arduino-cli` em `C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe` (placa `esp32:esp32`, FQBN `esp32:esp32:esp32`; a pasta do sketch é `catraca_esp32/` e compila com `.`). Gravar: `compile --upload -p COM3`. Com o SafeTech aberto a COM3 fica ocupada: fechar o app (ou `CATRACA_SERIAL_ATIVA = False`) antes de gravar.
 - Dependências entre camadas têm direção única: interface → serviços → núcleo.
+
+## Erros e log
+
+- Cada módulo usa `log = logging.getLogger(__name__)`; o `app.py` e o `painel_web.py` ligam o arquivo `logs/safetech.log` (`servicos/log_erros.configurar`, com rotação; ajustes `PASTA_LOGS`, `TAMANHO_MAXIMO_LOG_BYTES`...). Os testes não ligam o arquivo.
+- `except` que engole um erro deve ao menos registrá-lo (`log.exception`). Erros de botões vão para o log e para o aviso (`report_callback_exception`); o ciclo da tela registra e segue.
+- A análise de cada área se recupera sozinha (`Analisador._executar`: `ESPERA_REINICIO_ANALISE_SEG`, `MAXIMO_REINICIOS_ANALISE`); a faixa mostra "REINICIANDO A ANÁLISE".
+- Títulos da faixa (liberado/negado/analisando/aguardando) só por `modos.titulo_da_situacao`, usado pela tela e pelo painel web.
 
 ## Regras do projeto (não quebrar)
 
@@ -63,10 +71,10 @@ python -m pytest       # testes automatizados (pasta testes/, ~35 s)
 ## Testes
 
 - Testes em `testes/` (pytest, configurado em `pytest.ini`). Rodar `python -m pytest` depois de qualquer mudança e manter todos passando; funcionalidade nova ganha teste novo.
-- `testes/conftest.py` já redireciona os caminhos abaixo e oferece as fixtures `auditoria`, `raiz` (janela escondida) e `sem_ia`; `testes/falsos.py` tem câmera, detector, classificador e câmera IP falsos. Reaproveitar em vez de recriar.
+- `testes/conftest.py` já redireciona os caminhos abaixo e oferece as fixtures `auditoria`, `raiz` (janela escondida) e `sem_ia` (troca `CargaIA.carregar`); `testes/falsos.py` tem câmera, detector, classificador e câmera IP falsos. Reaproveitar em vez de recriar.
 - Os testes não podem depender do TensorFlow (o GitHub Actions não o instala).
 - Os testes **nunca abrem a porta USB real** do ESP32: o `conftest.py` põe `CATRACA_SERIAL_ATIVA = False` e os testes do envio usam uma porta falsa.
-- Testes devem gravar só em **pastas temporárias**: alterar `config.PASTA_AUDITORIA`, `config.ARQUIVO_LOG_AUDITORIA`, `config.PASTA_IMAGENS_AUDITORIA`, `config.PASTA_IMAGENS_DATASET`, `config.ARQUIVO_ROTULOS`, `config.ARQUIVO_PREFERENCIAS`, `config.PASTA_EXCLUIDOS`, `config.PASTA_RELATORIOS` e `config.PASTA_CAPTURAS` **antes** de importar os serviços (os padrões são lidos na importação).
+- Testes devem gravar só em **pastas temporárias**: alterar `config.PASTA_AUDITORIA`, `config.ARQUIVO_LOG_AUDITORIA`, `config.PASTA_IMAGENS_AUDITORIA`, `config.PASTA_IMAGENS_DATASET`, `config.ARQUIVO_ROTULOS`, `config.ARQUIVO_PREFERENCIAS`, `config.PASTA_EXCLUIDOS`, `config.PASTA_RELATORIOS`, `config.PASTA_CAPTURAS` e `config.PASTA_LOGS` **antes** de importar os serviços (os padrões são lidos na importação).
 - Para o painel web em teste: `config.PAINEL_WEB_HOST = "127.0.0.1"` (ou `na_rede=False` nos ajustes) e outra porta, para não acionar o firewall do Windows nem colidir com o app aberto. O `conftest.py` baixa `ITERACOES_HASH_SENHA` para 1000 (o hash de verdade é lento de propósito).
 - Câmera IP em teste: servir um MJPEG falso em `127.0.0.1` (`multipart/x-mixed-replace`) e abrir `http://127.0.0.1:<porta>/...`.
 - **Não ligar a webcam do usuário** em testes: passar uma câmera falsa para `JanelaPrincipal(raiz, escala, camera=...)`.

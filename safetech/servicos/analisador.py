@@ -12,8 +12,13 @@ Roda em uma thread própria e repete, para cada frame novo da câmera:
 
 A interface nunca espera por esta thread: ela só lê o último resultado
 publicado. É isso que mantém o vídeo fluido mesmo enquanto a IA trabalha.
+
+Se algo inesperado quebrar a análise, a própria thread faz papel de
+"vigia": guarda o erro no log, espera um pouco e recomeça sozinha
+(veja _executar). Só desiste depois de várias falhas seguidas.
 """
 
+import logging
 import queue
 import threading
 import time
@@ -25,6 +30,9 @@ from safetech.nucleo import anotacao, decisao, modos
 from safetech.nucleo.rastreador import RastreadorPessoas
 from safetech.nucleo.tipos import EstadoCena, PessoaObservada, StatusPessoa
 from safetech.servicos import auditoria as modulo_auditoria
+
+
+log = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -110,8 +118,15 @@ class Analisador:
 
         self._ultima_classificacao = 0.0
 
-        # Mensagem do erro que interrompeu a análise (None = tudo certo)
+        # Mensagem do último erro da análise (None = tudo certo). Lida
+        # pela interface; trocada inteira de uma vez (seguro entre threads).
         self.erro = None
+
+        # True enquanto a análise espera para recomeçar depois de um erro
+        self.reiniciando = False
+
+        # Quantas vezes a análise já recomeçou sozinha desde que abriu
+        self.reinicios = 0
 
         self._parar = threading.Event()
         self._thread = None
@@ -172,15 +187,75 @@ class Analisador:
     # ============================================================
 
     def _executar(self):
+        """
+        Roda a análise e, se ela quebrar, recomeça sozinha (o "vigia").
 
-        # Se algo inesperado acontecer, a thread não morre em silêncio:
-        # o erro fica guardado para a interface mostrar ao usuário.
-        try:
-            self._laco()
+            falhou  -> guarda o erro no log e na tela, espera
+                       ESPERA_REINICIO_ANALISE_SEG e tenta de novo;
+            de novo -> conta as falhas SEGUIDAS; passou de
+                       MAXIMO_REINICIOS_ANALISE, desiste (o erro fica na
+                       tela até o programa ser reaberto).
 
-        except Exception as erro:
-            self.erro = f"{type(erro).__name__}: {erro}"
-            self._publicar(EstadoCena())
+        Uma análise que rodou bem por TEMPO_ESTAVEL_ANALISE_SEG antes de
+        falhar zera a contagem: é um problema novo, não o mesmo de antes.
+        """
+
+        falhas_seguidas = 0
+
+        while not self._parar.is_set():
+
+            inicio = time.perf_counter()
+
+            try:
+                self._laco()
+                return   # parou porque pediram (parar())
+
+            except Exception as erro:
+
+                if time.perf_counter() - inicio >= config.TEMPO_ESTAVEL_ANALISE_SEG:
+                    falhas_seguidas = 0
+
+                falhas_seguidas += 1
+
+                descricao = f"{type(erro).__name__}: {erro}"
+
+                log.exception(
+                    "Erro na análise da área %s (falha seguida %d de %d)",
+                    self._parametros.area,
+                    falhas_seguidas,
+                    config.MAXIMO_REINICIOS_ANALISE,
+                )
+
+                # A tela não fica mostrando caixas velhas enquanto isso
+                self._publicar(EstadoCena(modo=self._parametros.modo_deteccao, area=self._parametros.area))
+
+                if falhas_seguidas > config.MAXIMO_REINICIOS_ANALISE:
+
+                    self.reiniciando = False
+                    self.erro = (
+                        f"{descricao}. A análise parou depois de {config.MAXIMO_REINICIOS_ANALISE} "
+                        "tentativas seguidas (detalhes em logs/safetech.log)."
+                    )
+
+                    log.error("Análise da área %s desistiu de recomeçar", self._parametros.area)
+                    return
+
+                self.erro = descricao
+                self.reiniciando = True
+
+                if self._parar.wait(config.ESPERA_REINICIO_ANALISE_SEG):
+                    return
+
+                # Recomeça do zero: sem pessoas lembradas de antes do erro
+                self._rastreador = RastreadorPessoas()
+                self._modo_em_uso = None
+                self._ultima_classificacao = 0.0
+
+                self.reinicios += 1
+                self.reiniciando = False
+                self.erro = None
+
+                log.warning("Análise da área %s recomeçou (reinício nº %d)", self._parametros.area, self.reinicios)
 
     def _laco(self):
 

@@ -37,6 +37,7 @@ config.PASTA_IMAGENS_AUDITORIA = config.PASTA_AUDITORIA / "imagens"
 config.PASTA_EXCLUIDOS = config.PASTA_AUDITORIA / "excluidos"
 config.PASTA_RELATORIOS = config.PASTA_AUDITORIA / "relatorios"
 config.PASTA_CAPTURAS = config.PASTA_AUDITORIA / "capturas"
+config.PASTA_LOGS = PASTA_TEMPORARIA / "logs"
 config.PASTA_IMAGENS_DATASET = PASTA_TEMPORARIA / "dataset" / "epis"
 config.ARQUIVO_ROTULOS = PASTA_TEMPORARIA / "dataset" / "rotulos.csv"
 config.ARQUIVO_PREFERENCIAS = PASTA_TEMPORARIA / "preferencias.json"
@@ -161,6 +162,6 @@ def sem_ia(monkeypatch):
     TensorFlow levaria vários segundos por teste.
     """
 
-    from safetech.interface import janela_principal
+    from safetech.interface import controlador_ia
 
-    monkeypatch.setattr(janela_principal.JanelaPrincipal, "_carregar_ia", lambda self: None)
+    monkeypatch.setattr(controlador_ia.CargaIA, "carregar", lambda self: None)

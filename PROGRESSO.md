@@ -1,6 +1,6 @@
 # PROGRESSO — SafeTech Entry
 
-Última atualização: 24/11/2026. Tudo commitado (o último commit traz as seções 2.15 a 2.18).
+Última atualização: 25/11/2026. Tudo commitado (o último commit traz a seção 2.19).
 
 Este arquivo descreve **onde o trabalho parou**. Para entender o projeto em si (instalação, uso, arquitetura completa), leia o `README.md`. Para regras permanentes de trabalho no projeto, leia o `CLAUDE.md`.
 
@@ -146,6 +146,13 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 - Selo do cabeçalho: amarelo com senha padrão ou sem senha; "Painel web desligado" leva às Configurações.
 - Isso resolve a pendência da senha padrão pública: basta trocar pela tela antes de publicar/usar. `config.h` da catraca (Wi-Fi) precisa ser atualizado à mão se mudar usuário/senha/porta.
 - Testes: 195 (novo `test_acesso_web.py`). Conferido por captura de tela da aba nos dois temas.
+
+### 2.19 Bloco 1 da revisão: controladores, log e análise que se recupera (25/11)
+- **Janela principal dividida** (1.925 → ~660 linhas): a janela monta a tela e liga os controladores `ia`, `areas`, `cameras`, `eventos`, `coleta`, `painel_web` e `catraca` (arquivos `interface/controlador_*.py`). Comportamento igual; os testes foram migrados para os nomes novos (`janela.areas.lista`, `janela.areas.selecionar(...)`, `janela.cameras...`, `janela.eventos.receber()`, `janela.painel_web.servidor`, `janela.catraca.serial`; monkeypatch de `pedir_area` em `controlador_areas`, de `CatracaSerial` em `controlador_catraca`; `sem_ia` troca `CargaIA.carregar`).
+- **Log em arquivo**: `servicos/log_erros.py` (`logs/safetech.log`, rotação por tamanho, erros não tratados de threads e do programa). Ligado no `app.py` e no `painel_web.py`. Registram: análise (erros e reinícios), IA, painel web, catraca, áreas, câmeras IP, zerar/excluir/exportar. Erro de botão vai para o log e para o aviso do rodapé; o ciclo da tela registra (sem repetir) e segue.
+- **Vigia da análise** em `Analisador._executar`: erro → log, faixa "REINICIANDO A ANÁLISE", espera `ESPERA_REINICIO_ANALISE_SEG`, recomeça; desiste depois de `MAXIMO_REINICIOS_ANALISE` falhas seguidas (`TEMPO_ESTAVEL_ANALISE_SEG` zera a contagem).
+- **Repetições**: título da faixa só em `modos.titulo_da_situacao` (chaves novas `faixa_analisando`/`faixa_sem_pessoas` em `TEXTOS_POR_MODO`), usado pela tela e pelo painel web. Erro de digitação no `app.py` corrigido. `logs/` no `.gitignore`.
+- Testes: 209 (novo `test_robustez.py`). Tela conferida por captura (igual à de antes). Ficou para depois: juntar os `registrar(...)` repetidos nos testes num ajudante em `falsos.py`.
 
 ---
 

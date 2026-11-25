@@ -53,3 +53,6 @@ desktop.ini
 
 # Detector de corpo inteiro (35 MB): baixado à parte, veja o README
 modelos/object_detection_yolox_*.onnx
+
+# Registro de erros do programa (logs/safetech.log)
+logs/

@@ -13,12 +13,15 @@ Não abra os dois ao mesmo tempo: eles usam a mesma porta.
 import time
 import webbrowser
 
-from safetech.servicos import preferencias
+from safetech.servicos import log_erros, preferencias
 from safetech.servicos.auditoria import ServicoAuditoria
 from safetech.web.servidor import ServidorWeb
 
 
 def principal():
+
+    # Erros e acontecimentos vão também para logs/safetech.log
+    log_erros.configurar()
 
     # Porta, rede, usuário e senha: os mesmos escolhidos no aplicativo
     # (Configurações > Painel web). Aqui o painel sobe mesmo que lá esteja

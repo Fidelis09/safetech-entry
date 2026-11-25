@@ -50,11 +50,12 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - **Excluir linha sem perder o registro**: o evento sai da tabela, mas vai para uma pasta de excluídos, com a data da exclusão.
 - **Catraca de demonstração com ESP32**: maquete com cancela (servo), LEDs, bipe e tela que obedece ao sistema pelo Wi-Fi (pasta `catraca_esp32/`).
 - **Várias câmeras (áreas)**: cada área abre numa aba, com a sua própria câmera, setor, EPIs e modo. A auditoria continua uma só, com a área de cada evento.
-- **Testes automatizados**: 195 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
+- **Testes automatizados**: 209 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
 - **Coleta de dataset rotulada**: marque o que a pessoa está usando e salve, por botão ou atalho de teclado.
 - **Painel web ajustado na tela**: ligar, porta, acesso pela rede, usuário e senha em **Configurações > Painel web**. A senha fica guardada só como hash.
 - **Painel web do gerente**, somente leitura: status ao vivo, indicadores, gráfico e fotos pelo navegador, inclusive no celular.
 - **Abertura imediata**: a janela aparece na hora e o modelo de IA carrega em segundo plano.
+- **Registro de erros em arquivo** (`logs/safetech.log`, com tamanho limitado) e **análise que se recupera sozinha**: se a análise de uma câmera quebrar, ela recomeça em alguns segundos.
 
 ---
 
@@ -410,6 +411,9 @@ Tech_day_26.2/
 │   │   ├── catraca_serial.py   Envia o status à catraca ESP32 pelo cabo USB
 │   │   ├── dataset.py          Salva imagens de treino com os rótulos
 │   │   ├── importacao.py       Abre imagens de arquivo ou da área de transferência
+│   │   ├── capturas.py         Fotos do botão "Capturar foto"
+│   │   ├── acesso_web.py       Ajustes do painel web e hash da senha
+│   │   ├── log_erros.py        Registro de erros em logs/safetech.log
 │   │   └── preferencias.py     Lembra setor, EPIs, câmera e câmeras IP
 │   │
 │   ├── interface/          A janela (Tkinter)
@@ -422,7 +426,14 @@ Tech_day_26.2/
 │   │   ├── painel_auditoria.py      Indicadores, filtros, tabela e evidência
 │   │   ├── janela_configuracoes.py  Janela de Configurações (área e câmera, análise, coleta)
 │   │   ├── dialogo_camera_ip.py     Janela "Adicionar câmera IP"
-│   │   └── janela_principal.py      Monta a tela e liga tudo
+│   │   ├── controlador_ia.py        Carrega a IA em segundo plano
+│   │   ├── controlador_areas.py     Áreas: criar, mostrar, visão geral, fiscalização
+│   │   ├── controlador_cameras.py   Ligar/trocar câmera, câmeras IP, capturar foto
+│   │   ├── controlador_auditoria.py Zerar, excluir, relatório, exportar, bipe
+│   │   ├── controlador_coleta.py    Coleta e importação de imagens do dataset
+│   │   ├── controlador_painel_web.py Liga e reinicia o painel web
+│   │   ├── controlador_catraca.py   Catraca ESP32 pelo cabo
+│   │   └── janela_principal.py      Monta a tela e liga os controladores
 │   │
 │   ├── web/                Painel web do gerente (somente leitura)
 │   │   ├── servidor.py         Servidor HTTP: página, dados e imagens
@@ -436,6 +447,7 @@ Tech_day_26.2/
 │   ├── epis/               Imagens coletadas pelo aplicativo
 │   └── rotulos.csv         Quais EPIs aparecem em cada imagem
 ├── preferencias.json       Seleções e câmeras IP (gerado pelo programa)
+├── logs/                   Registro de erros: safetech.log (gerado pelo programa)
 └── auditoria/              Gerada pelo programa
     ├── log_auditoria.csv
     ├── arquivados/         Logs e fotos anteriores, movidos pelo botão Zerar
@@ -674,7 +686,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Saída esperada: `195 passed` em menos de um minuto.
+Saída esperada: `209 passed` em menos de um minuto.
 
 | Arquivo | O que testa |
 |---|---|
@@ -685,6 +697,7 @@ Saída esperada: `195 passed` em menos de um minuto.
 | `test_camera.py` | Câmera IP: conexão, queda e reconexão, endereço errado, senha escondida; webcam que cai e reabre sozinha |
 | `test_analisador.py` | Linha de análise completa: decisão, uma foto por pessoa, troca de setor |
 | `test_painel_web.py` | Painel web: login, somente leitura, proteção das pastas, situação de cada área, imagem por área, download da planilha |
+| `test_robustez.py` | Registro em arquivo (sem duplicar, sem crescer sem fim), análise que recomeça sozinha e que desiste depois de muitas falhas, erro de botão indo para o log, título da faixa igual na tela e no painel web |
 | `test_acesso_web.py` | Painel web ajustado na tela: hash da senha, validação dos campos, ajustes salvos sem a senha, servidor aceitando a senha nova, "Aplicar" reiniciando o painel e porta em uso |
 | `test_temas.py` | Tema escuro e claro: paletas compatíveis, troca com o programa aberto, preferência salva |
 | `test_exportacao.py` | Planilha de exportação (cabeçalhos, `;`, acentos para o Excel) e carimbo das fotos de evidência |
@@ -710,6 +723,8 @@ No GitHub, os testes rodam sozinhos a cada envio de código (arquivo `.github/wo
 
 | Problema | Solução |
 |---|---|
+| **Algo deu errado e ninguém viu a mensagem** | Abra `logs/safetech.log`: cada erro fica lá com data, hora, de qual parte do programa veio e o detalhe completo. O arquivo não cresce sem fim (veja `TAMANHO_MAXIMO_LOG_BYTES`). |
+| **A faixa mostra "REINICIANDO A ANÁLISE"** | A análise daquela câmera teve um erro inesperado e vai recomeçar sozinha em alguns segundos. Se repetir muitas vezes seguidas, ela para e mostra "ERRO NA ANÁLISE"; o motivo está em `logs/safetech.log`. |
 | **"Nenhum modelo encontrado em 'modelos/'"** | Recupere os arquivos de `modelos/` do repositório, ou colete imagens e rode `python treinar.py`. |
 | **A escolha de setor e EPIs está cinza** | O programa está usando o modelo antigo, que não distingue os EPIs. Colete imagens rotuladas e rode `python treinar.py`. |
 | **Um EPI específico erra muito** | Veja a taxa de acerto dele no fim do treino e colete mais imagens desse EPI, nos dois casos (usando e sem usar) e em combinações variadas. |

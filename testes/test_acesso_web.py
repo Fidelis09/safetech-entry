@@ -269,7 +269,7 @@ def test_aplicar_liga_o_painel_com_a_senha_nova(janela):
     configuracoes = janela._configuracoes
 
     # No conftest o painel começa desligado
-    assert janela._servidor_web is None
+    assert janela.painel_web.servidor is None
     assert "desligado" in janela._rotulo_painel_web.cget("text")
 
     porta = porta_livre()
@@ -278,7 +278,7 @@ def test_aplicar_liga_o_painel_com_a_senha_nova(janela):
     configuracoes._aplicar_painel_web()
 
     assert "No ar" in configuracoes._rotulo_situacao_web.cget("text") or "no ar" in configuracoes.mensagem_painel_web()
-    assert janela._servidor_web is not None
+    assert janela.painel_web.servidor is not None
 
     # A senha digitada some dos campos depois de aplicada
     assert configuracoes._web_senha.get() == ""
@@ -294,7 +294,7 @@ def test_aplicar_liga_o_painel_com_a_senha_nova(janela):
     configuracoes._web_ativo.set(False)
     configuracoes._aplicar_painel_web()
 
-    assert janela._servidor_web is None
+    assert janela.painel_web.servidor is None
     assert "desligado" in configuracoes.mensagem_painel_web()
 
 
@@ -306,7 +306,7 @@ def test_aplicar_com_erro_nao_muda_nada(janela):
     configuracoes._aplicar_painel_web()
 
     assert "pelo menos" in configuracoes.mensagem_painel_web()
-    assert janela._servidor_web is None
+    assert janela.painel_web.servidor is None
 
 
 def test_porta_ocupada_avisa(janela):
@@ -322,7 +322,7 @@ def test_porta_ocupada_avisa(janela):
         janela._configuracoes._aplicar_painel_web()
 
     assert "em uso" in janela._configuracoes.mensagem_painel_web()
-    assert janela._servidor_web is None
+    assert janela.painel_web.servidor is None
 
 
 def test_aviso_da_senha_padrao(janela):
