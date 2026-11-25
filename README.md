@@ -1,5 +1,7 @@
 # SafeTech Entry
 
+[![Testes](https://github.com/Fidelis09/safetech-entry/actions/workflows/testes.yml/badge.svg)](https://github.com/Fidelis09/safetech-entry/actions/workflows/testes.yml)
+
 Catraca inteligente com reconhecimento de EPI por visão computacional.
 
 O programa usa a câmera (webcam ou câmera IP) para verificar, **equipamento por equipamento** (capacete, óculos, colete e luvas), o que cada pessoa na frente da câmera está usando. Você escolhe o setor que está sendo fiscalizado e o sistema cobra apenas os EPIs exigidos nele: num setor que só exige luvas, quem está de luvas passa. O acesso só é liberado quando todas as pessoas na imagem estão em conformidade, e cada decisão fica registrada em um log de auditoria, com foto de evidência.
@@ -74,6 +76,13 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - Webcam ou câmera IP na mesma rede
 
 ### Passo a passo
+
+0. Baixe o projeto (ou use **Code > Download ZIP** na página do GitHub):
+
+   ```bash
+   git clone https://github.com/Fidelis09/safetech-entry.git
+   cd safetech-entry
+   ```
 
 1. Instale as dependências:
 

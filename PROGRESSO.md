@@ -12,7 +12,7 @@ O SafeTech Entry é um projeto acadêmico (desafio de segurança do trabalho): u
 
 O foco das últimas rodadas foi fazer o sistema funcionar numa **câmera geral de obra** (várias pessoas pequenas, de costas, se movimentando e se cruzando), e não só numa catraca com uma pessoa de frente. O usuário testa com um **vídeo emulado** de canteiro de obras como câmera (`INDICE_CAMERA = 1`).
 
-Estado: as funcionalidades pedidas estão implementadas e commitadas. O que falta agora é sobretudo **qualidade do modelo de EPI** (dataset pequeno e desbalanceado) e **publicar no GitHub**.
+Estado: as funcionalidades pedidas estão implementadas e commitadas. O que falta agora é sobretudo **qualidade do modelo de EPI** (dataset pequeno e desbalanceado) (o projeto já está no GitHub: https://github.com/Fidelis09/safetech-entry).
 
 ---
 
@@ -36,7 +36,7 @@ A sessão foi longa e passou por várias fases. Em ordem:
 
 ### 2.4 Repositório git (05/10)
 - `git init`, `.gitignore` (exclui fotos do dataset, auditoria, `_versao_anterior/`, `preferencias.json`, modelo YOLOX).
-- **Não publicado no GitHub**: o `gh` (GitHub CLI) não está instalado (ver seção 4).
+- Publicado no GitHub em 25/11/2026: https://github.com/Fidelis09/safetech-entry (remoto `origin`, enviado com `git push`; o `gh` não é necessário).
 
 ### 2.5 EPIs separados e fiscalização por setor (commits `e642eb9` a `a084f23`, 07/10)
 - Classificador **multirrótulo** (uma saída sigmoid por EPI): `safetech/treino/treinador.py`, `safetech/nucleo/classificador.py`.
@@ -186,9 +186,9 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 Nenhuma alteração de código ficou incompleta: tudo foi commitado. Estão pela metade:
 
 1. ~~README desatualizado~~: corrigido em 30/10.
-2. **Publicação no GitHub.** Repositório só local, sem remoto. Parou esperando o usuário instalar e autenticar o GitHub CLI. Decisões já tomadas: repositório **público**, autor "João Fidelis <jfidelis999@gmail.com>", **sem** fotos do dataset.
+2. ~~Publicação no GitHub~~: feita em 25/11/2026 (https://github.com/Fidelis09/safetech-entry), sem fotos do dataset.
 3. **Qualidade do modelo de EPI.** Ver seção 5. Parou em: o usuário treinou com 49 imagens; nos testes do sistema, quase todas as pessoas saem como "NEGADO".
-4. ~~Testes fora do repositório~~: pasta `testes/` criada em 30/10. Depois de publicar no GitHub, acrescentar ao topo do README o selo do Actions (precisa da URL do repositório).
+4. ~~Testes fora do repositório~~: pasta `testes/` criada em 30/10; selo do Actions no topo do README desde a publicação.
 
 ---
 
@@ -200,12 +200,7 @@ Nenhuma alteração de código ficou incompleta: tudo foi commitado. Estão pela
    - no programa: um novo "classificador" que, para cada pessoa, diz quais EPIs foram ACHADOS dentro da caixa dela, devolvendo o mesmo vetor de probabilidades de hoje (a decisão, o setor e a auditoria não mudam).
 
 1. **Corrigir os dois trechos desatualizados do README** (item 3.1).
-2. **Publicar no GitHub.** O usuário roda, no terminal do VS Code:
-   ```
-   winget install --id GitHub.cli -e
-   gh auth login --web --git-protocol https
-   ```
-   Depois: `gh repo create <nome> --public --source . --push`. Antes de publicar: confirmar com o usuário se o e-mail `jfidelis999@gmail.com` é o da conta GitHub dele, e lembrar que a senha padrão do painel web (`PAINEL_WEB_SENHA = "safetech"`) ficará pública.
+2. ~~Publicar no GitHub~~: feito. Conferir na aba **Actions** do repositório se os testes passam no Windows do GitHub (primeira execução foi no envio de 25/11).
 3. **Melhorar o dataset e re-treinar** (é o que mais melhora o resultado):
    - coletar muito mais imagens **sem** cada EPI (hoje são só 10 a 19 por EPI);
    - variar combinações (só capacete, só luvas, tudo, nada);

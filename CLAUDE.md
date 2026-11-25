@@ -92,7 +92,7 @@ python -m pytest       # testes automatizados (pasta testes/, ~35 s)
 
 ## Git
 
-- Repositório local, branch `main`, **sem remoto** por enquanto (ver `PROGRESSO.md`).
+- Branch `main`, publicada em https://github.com/Fidelis09/safetech-entry (remoto `origin`). `git push` só quando o usuário pedir; o GitHub Actions roda os testes a cada envio.
 - Commits em português, com mensagem explicando o que mudou e por quê.
 - Autor dos commits: passar `-c user.name="João Fidelis" -c user.email="jfidelis999@gmail.com"` no comando. **Não alterar o git config.**
 - Commitar só quando o usuário pedir.
