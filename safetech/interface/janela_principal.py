@@ -19,6 +19,9 @@ CONTROLADORES, um por assunto, cada um no seu arquivo:
     eventos     -> ControladorAuditoria  (controlador_auditoria.py)
     coleta      -> ControladorColeta     (controlador_coleta.py)
     painel_web  -> ControladorPainelWeb  (controlador_painel_web.py)
+    indicadores -> ControladorIndicadores (controlador_indicadores.py)
+    telao       -> ControladorTelao      (controlador_telao.py)
+    sistema     -> ControladorSistema    (controlador_sistema.py)
     catraca     -> ControladorCatraca    (controlador_catraca.py)
 
 Os controladores usam da janela só o que é dela: a raiz do Tkinter, a
@@ -49,14 +52,17 @@ from PIL import ImageTk
 
 from safetech import config
 from safetech.interface import tema
-from safetech.interface.componentes import Selo
+from safetech.interface.componentes import Avisos, PainelAtalhos, Selo, dica
 from safetech.interface.controlador_areas import ControladorAreas
 from safetech.interface.controlador_auditoria import ControladorAuditoria
 from safetech.interface.controlador_cameras import ControladorCameras
 from safetech.interface.controlador_catraca import ControladorCatraca
 from safetech.interface.controlador_coleta import ControladorColeta
 from safetech.interface.controlador_ia import CargaIA
+from safetech.interface.controlador_indicadores import ControladorIndicadores
 from safetech.interface.controlador_painel_web import ControladorPainelWeb
+from safetech.interface.controlador_sistema import ControladorSistema
+from safetech.interface.controlador_telao import ControladorTelao
 from safetech.interface.janela_configuracoes import JanelaConfiguracoes
 from safetech.interface.painel_auditoria import PainelAuditoria
 from safetech.interface.tema import CORES
@@ -69,7 +75,23 @@ from safetech.servicos.camera import Camera
 log = logging.getLogger(__name__)
 
 
-TEXTO_ATALHOS = "Espaço: câmera   |   S: salvar imagem   |   Ctrl+V: colar imagem   |   F11: tela cheia   |   Esc: limpar busca"
+# Teclas de atalho, mostradas no painel do F1: (tecla, o que faz)
+ATALHOS = [
+    ("F1", "Mostra ou esconde esta lista"),
+    ("Espaço", "Liga ou desliga a câmera da área aberta"),
+    ("F2", "Abre ou fecha o telão do trabalhador"),
+    ("F11", "Tela cheia (no telão, a tela cheia do telão)"),
+    ("Esc", "Fecha esta lista, sai da tela cheia ou limpa a busca da auditoria"),
+    ("S", "Salva uma imagem da câmera no dataset (rótulos da Coleta)"),
+    ("Ctrl+V", "Cola no dataset uma imagem copiada"),
+    ("Delete", "Exclui a linha escolhida na auditoria (com confirmação)"),
+]
+
+# Palavras do começo de um aviso que indicam erro (o cartão sai vermelho)
+INICIO_DE_AVISO_DE_ERRO = ("Não foi possível", "Erro")
+
+# De quanto em quanto tempo (s) a sobrecarga das áreas é conferida
+INTERVALO_CONFERENCIA_SOBRECARGA_SEG = 1.0
 
 # Tamanho do ícone do cabeçalho e da barra de tarefas (px a 100% de escala)
 TAMANHO_ICONE_CABECALHO = 30
@@ -113,13 +135,16 @@ class JanelaPrincipal:
         # arquivo baixado à parte)
         modos_disponiveis = [modo for modo in config.MODOS_DETECCAO if detector.modo_disponivel(modo)]
 
-        self._aviso_ate = 0.0
 
         # Último segundo mostrado no relógio do cabeçalho
         self._ultimo_relogio = ""
 
         # Último erro do ciclo da tela que foi para o log (veja _ciclo)
         self._ultimo_erro_do_ciclo = None
+
+        # Próxima conferência de sobrecarga e o texto do último aviso
+        self._proxima_conferencia_sobrecarga = 0.0
+        self._sobrecarga_anterior = ""
 
         # Ícone do programa (título da janela e barra de tarefas). A
         # referência fica guardada: sem ela o Tkinter apaga a imagem.
@@ -145,6 +170,9 @@ class JanelaPrincipal:
         self.coleta = ControladorColeta(self, self.areas)
         self.painel_web = ControladorPainelWeb(self, self.areas)
         self.catraca = ControladorCatraca(self.areas)
+        self.indicadores = ControladorIndicadores(self, self.areas)
+        self.telao = ControladorTelao(self, self.areas)
+        self.sistema = ControladorSistema(self, self.areas, self.cameras, self.painel_web, modos_disponiveis)
 
         # ------------------------------------------------------
         # MONTAGEM DA TELA
@@ -178,6 +206,10 @@ class JanelaPrincipal:
         # A IA demora alguns segundos para carregar (TensorFlow). Isso
         # é feito em segundo plano para a janela abrir imediatamente.
         self.ia.iniciar()
+
+        # Primeira vez: o assistente de configuração aparece sozinho
+        # (depois que a janela terminou de abrir)
+        self._raiz.after_idle(self.sistema.conferir_primeira_execucao)
 
         # Procura as câmeras para a lista (só com a câmera real: uma
         # câmera falsa de teste não tem o que procurar)
@@ -246,6 +278,8 @@ class JanelaPrincipal:
         # ------------------------------------------------------
 
         divisor = ttk.PanedWindow(self._raiz, orient="horizontal")
+
+        self._divisor = divisor
         divisor.grid(row=1, column=0, sticky="nsew", padx=12)
 
         # ---------------- esquerda: as áreas ----------------
@@ -260,13 +294,28 @@ class JanelaPrincipal:
         ttk.Label(topo, text="Monitoramento", style="Titulo.Painel.TLabel").pack(side="left")
 
         # Câmera, confiança, intervalo, painel web e coleta ficam numa janela à parte
-        ttk.Button(
+        botao_configuracoes = ttk.Button(
             topo,
             text="Configurações",
             style="Secundario.TButton",
             command=lambda: self._configuracoes.mostrar(),
             takefocus=False,
-        ).pack(side="right")
+        )
+        botao_configuracoes.pack(side="right")
+
+        dica(botao_configuracoes, "Câmera, análise, painel web, coleta de imagens, backup e assistente")
+
+        # Tela para o trabalhador: o resultado em letras gigantes (F2)
+        botao_telao = ttk.Button(
+            topo,
+            text="Telão",
+            style="Secundario.TButton",
+            command=self.telao.alternar,
+            takefocus=False,
+        )
+        botao_telao.pack(side="right", padx=(0, 8))
+
+        dica(botao_telao, "Tela para o trabalhador: resultado em letras grandes e os EPIs que faltam (F2)")
 
         # Barra de áreas (linha 1) e as páginas / visão geral (linha 2)
         self.areas.montar(esquerda, linha_barra=1, linha_paginas=2)
@@ -291,6 +340,10 @@ class JanelaPrincipal:
             ao_enviar_arquivos=self.coleta.enviar_arquivos,
             ao_aplicar_painel_web=self.painel_web.aplicar,
             ao_abrir_painel_web=self.painel_web.abrir,
+            ao_assistente=self.sistema.abrir_assistente,
+            ao_salvar_backup=self.sistema.salvar_backup,
+            ao_restaurar_backup=self.sistema.restaurar_backup,
+            ao_abrir_logs=self.sistema.abrir_logs,
             escala=self._escala,
         )
 
@@ -303,11 +356,19 @@ class JanelaPrincipal:
             ao_excluir=self.eventos.excluir,
             ao_salvar_relatorio=self.eventos.salvar_relatorio,
             ao_exportar=self.eventos.exportar,
+            ao_indicadores=self.indicadores.abrir,
+            colunas_visiveis=preferencias.carregar_colunas_auditoria(),
+            ao_mudar_colunas=preferencias.salvar_colunas_auditoria,
             escala=self._escala,
         )
 
         divisor.add(esquerda, weight=3)
         divisor.add(self._painel_auditoria, weight=2)
+
+        # O divisor começa com as câmeras em FRACAO_LARGURA_MONITORAMENTO da
+        # largura (sem isso, o lado que pede mais espaço espreme o outro).
+        # Depois o usuário pode arrastá-lo à vontade.
+        divisor.bind("<Map>", self._posicionar_divisor, add="+")
 
         # ------------------------------------------------------
         # BARRA DE STATUS (avisos à esquerda, atalhos à direita)
@@ -316,11 +377,18 @@ class JanelaPrincipal:
         rodape = ttk.Frame(self._raiz, padding=(20, 8, 20, 10))
         rodape.grid(row=2, column=0, sticky="ew")
 
-        # Avisos temporários (o que acabou de acontecer)
-        self._rotulo_aviso = ttk.Label(rodape, text="", style="TLabel")
+        # O último aviso, com a hora (os avisos aparecem em cartões no
+        # canto e somem; aqui fica o mais recente, para quem se distraiu)
+        self._rotulo_aviso = ttk.Label(rodape, text="", style="Suave.TLabel")
         self._rotulo_aviso.pack(side="left")
 
-        ttk.Label(rodape, text=TEXTO_ATALHOS, style="Suave.TLabel").pack(side="right")
+        rotulo_atalhos = ttk.Label(rodape, text="F1: atalhos de teclado", style="Suave.TLabel", cursor="hand2")
+        rotulo_atalhos.pack(side="right")
+        rotulo_atalhos.bind("<Button-1>", lambda _evento: self._atalhos.alternar())
+
+        # Cartões de aviso (toasts) e o painel de atalhos: por cima da tela
+        self.avisos = Avisos(self._raiz, distancia_do_rodape=int(48 * self._escala))
+        self._atalhos = PainelAtalhos(self._raiz, ATALHOS)
 
     def _montar_cabecalho(self):
 
@@ -345,15 +413,29 @@ class JanelaPrincipal:
         selos = ttk.Frame(cabecalho)
         selos.grid(row=0, column=3, rowspan=2, sticky="e")
 
+        # Sobrecarga: só aparece quando alguma área está lenta. Clicar
+        # leva a Configurações > Análise (aumentar o intervalo alivia)
+        self._selo_sobrecarga = Selo(selos, ao_clicar=lambda: self._configuracoes.mostrar("analise"))
+        self._selo_sobrecarga.grid(row=0, column=0, padx=(0, 8))
+
+        dica(self._selo_sobrecarga, "O computador não está dando conta de analisar. Clique para aumentar o intervalo de análise")
+        self._selo_sobrecarga.grid_remove()
+
         self._selo_ia = Selo(selos)
-        self._selo_ia.grid(row=0, column=0, padx=(0, 8))
+        self._selo_ia.grid(row=0, column=1, padx=(0, 8))
+
+        dica(self._selo_ia, "Situação do modelo de IA que reconhece os EPIs")
 
         self._selo_painel_web = Selo(selos, ao_clicar=self.painel_web.abrir)
-        self._selo_painel_web.grid(row=0, column=1, padx=(0, 8))
+        self._selo_painel_web.grid(row=0, column=2, padx=(0, 8))
+
+        dica(self._selo_painel_web, "Painel do gerente no navegador. Clique para abrir (ou para ligar, nas Configurações)")
         self._selo_painel_web.grid_remove()
 
         self._selo_catraca = Selo(selos)
-        self._selo_catraca.grid(row=0, column=2, padx=(0, 8))
+        self._selo_catraca.grid(row=0, column=3, padx=(0, 8))
+
+        dica(self._selo_catraca, "Catraca de demonstração (ESP32) ligada pelo cabo USB")
         self._selo_catraca.grid_remove()
 
         # Cada selo é mantido pelo controlador do assunto
@@ -372,24 +454,43 @@ class JanelaPrincipal:
             command=self._alternar_tema,
             takefocus=False,
         )
-        self._botao_tema.grid(row=0, column=3, padx=(0, 8))
+        self._botao_tema.grid(row=0, column=4, padx=(0, 8))
+
+        dica(self._botao_tema, "Alterna entre o tema escuro e o claro (fica salvo)")
         self._atualizar_botao_tema()
 
         # Relógio: data e hora de referência para quem confere a tela
         self._rotulo_relogio = ttk.Label(selos, text="", style="TLabel", font=tema.FONTES["relogio"])
-        self._rotulo_relogio.grid(row=0, column=4, padx=(8, 0))
+        self._rotulo_relogio.grid(row=0, column=5, padx=(8, 0))
 
     # ============================================================
     # ATALHOS DE TECLADO E TELA CHEIA
     # ============================================================
 
+    def _posicionar_divisor(self, _evento=None):
+
+        largura = self._divisor.winfo_width()
+
+        if largura > 1 and not getattr(self, "_divisor_posicionado", False):
+
+            self._divisor_posicionado = True
+
+            self._divisor.sashpos(0, int(largura * config.FRACAO_LARGURA_MONITORAMENTO))
+
     def _configurar_atalhos(self):
 
         self._raiz.bind_all("<space>", self._atalho(self.cameras.alternar))
-        self._raiz.bind_all("<Escape>", self._ao_apertar_esc)
+        self._raiz.bind("<Escape>", self._ao_apertar_esc)
 
-        # F11: tela cheia (apresentação, monitor dedicado na portaria)
-        self._raiz.bind_all("<F11>", lambda _evento: self._alternar_tela_cheia())
+        # F11: tela cheia (apresentação, monitor dedicado na portaria).
+        # Só vale na janela principal: o telão tem o seu próprio F11.
+        self._raiz.bind("<F11>", lambda _evento: self._alternar_tela_cheia())
+
+        # F1: painel com todas as teclas de atalho
+        self._raiz.bind("<F1>", lambda _evento: self._atalhos.alternar())
+
+        # F2: abre ou fecha o telão do trabalhador
+        self._raiz.bind_all("<F2>", lambda _evento: self.telao.alternar())
 
         # S (maiúsculo ou minúsculo) salva uma imagem com os rótulos marcados
         for tecla in ("s", "S"):
@@ -411,9 +512,12 @@ class JanelaPrincipal:
         return tratar
 
     def _ao_apertar_esc(self, _evento=None):
-        """Esc sai da tela cheia; fora dela, limpa a busca da auditoria."""
+        """Esc fecha o painel de atalhos, sai da tela cheia ou limpa a busca da auditoria."""
 
-        if self._em_tela_cheia():
+        if self._atalhos.visivel:
+            self._atalhos.esconder()
+
+        elif self._em_tela_cheia():
             self._alternar_tela_cheia()
         else:
             self._painel_auditoria.limpar_filtro()
@@ -457,12 +561,13 @@ class JanelaPrincipal:
 
         self._painel_auditoria.aplicar_cores()
         self.areas.esquecer_desenhos()
+        self.indicadores.ao_trocar_tema()
 
         self._atualizar_botao_tema()
 
         preferencias.salvar_tema(novo)
 
-        self.avisar(f"Tema {tema.NOMES_DOS_TEMAS[novo].lower()} ativado.")
+        self.avisar(f"Tema {tema.NOMES_DOS_TEMAS[novo].lower()} ativado.", tipo="sucesso")
 
     # ============================================================
     # CARGA DA IA
@@ -537,8 +642,13 @@ class JanelaPrincipal:
                 # Desenho só do que está à vista
                 self.areas.desenhar()
 
+                self._atualizar_selo_sobrecarga()
+
+            self.indicadores.atualizar()
+            self.telao.atualizar()
+
             self._atualizar_relogio()
-            self._expirar_aviso()
+            self.avisos.atualizar()
 
         except Exception as erro:
 
@@ -556,6 +666,43 @@ class JanelaPrincipal:
             # Reagenda mesmo se algo falhar, para a tela não congelar
             self._raiz.after(config.INTERVALO_TELA_MS, self._ciclo)
 
+    def _atualizar_selo_sobrecarga(self, agora=None):
+        """
+        Mostra o selo "Sobrecarga" quando alguma área está com a análise
+        lenta (o computador não está dando conta). Some sozinho quando
+        a situação se normaliza.
+        """
+
+        agora = time.perf_counter() if agora is None else agora
+
+        if agora < self._proxima_conferencia_sobrecarga:
+            return
+
+        self._proxima_conferencia_sobrecarga = agora + INTERVALO_CONFERENCIA_SOBRECARGA_SEG
+
+        lentas = self.areas.sobrecarregadas(agora)
+
+        if not lentas:
+            texto = ""
+        elif len(lentas) == 1:
+            area, analises = lentas[0]
+            texto = f"Sobrecarga: {area.nome} ({analises:.0f} análises/s)"
+        else:
+            texto = f"Sobrecarga em {len(lentas)} áreas"
+
+        if texto == self._sobrecarga_anterior:
+            return
+
+        # Registra quando começa e quando termina (não a cada segundo)
+        if texto:
+            log.warning("%s. Sugestão: aumentar o intervalo de análise ou fechar áreas.", texto)
+        else:
+            log.info("Sobrecarga terminou")
+
+        self._sobrecarga_anterior = texto
+
+        self._selo_sobrecarga.definir(texto, CORES["alerta"])
+
     def _atualizar_relogio(self):
 
         agora = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
@@ -569,20 +716,23 @@ class JanelaPrincipal:
     # AVISOS NA BARRA DE STATUS
     # ============================================================
 
-    def avisar(self, texto, segundos=4):
-        """Mostra um aviso temporário, sem interromper o usuário com janelas."""
+    def avisar(self, texto, segundos=4, tipo=None):
+        """
+        Mostra um aviso num cartão no canto (some sozinho), sem
+        interromper o usuário com janelas.
 
-        self._rotulo_aviso.config(text=texto)
+        tipo -> "sucesso", "erro", "alerta" ou "info". Sem tipo, um aviso
+                que começa com "Não foi possível" sai como erro; os
+                outros, como informação.
+        """
 
-        self._aviso_ate = time.perf_counter() + segundos
+        if tipo is None:
+            tipo = "erro" if texto.startswith(INICIO_DE_AVISO_DE_ERRO) else "info"
 
-    def _expirar_aviso(self):
+        self.avisos.mostrar(texto, tipo, segundos)
 
-        if self._aviso_ate and time.perf_counter() > self._aviso_ate:
-
-            self._rotulo_aviso.config(text="")
-
-            self._aviso_ate = 0.0
+        # No rodapé fica o último aviso, com a hora
+        self._rotulo_aviso.config(text=f"{datetime.now():%H:%M}   {texto}")
 
     def _erro_na_interface(self, tipo, erro, rastro):
         """
@@ -594,16 +744,22 @@ class JanelaPrincipal:
 
         log.error("Erro na interface:\n%s", "".join(traceback.format_exception(tipo, erro, rastro)))
 
-        self.avisar(f"Erro inesperado: {erro} (detalhes em logs/{config.NOME_ARQUIVO_LOG})", segundos=10)
+        self.avisar(f"Erro inesperado: {erro} (detalhes em logs/{config.NOME_ARQUIVO_LOG})", segundos=10, tipo="erro")
 
     # ============================================================
     # ENCERRAMENTO
     # ============================================================
 
+    def fechar(self):
+        """Fecha o programa (o mesmo que o X da janela)."""
+
+        self._ao_fechar()
+
     def _ao_fechar(self):
 
         log.info("Programa fechado")
 
+        self.telao.fechar()
         self.areas.parar_todas()
         self.painel_web.parar()
         self.catraca.parar()

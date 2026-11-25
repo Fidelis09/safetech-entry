@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SafeTech Entry - Painel do gerente</title>
 
+<!-- Ícone e manifesto: no celular, "Adicionar à tela inicial" cria um
+     atalho com o escudo do SafeTech, que abre o painel como um app -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icone-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0f1318">
+<meta name="apple-mobile-web-app-capable" content="yes">
+
 <!--
   PAINEL WEB DO GERENTE (somente leitura)
 
@@ -15,6 +23,13 @@
       /api/areas      a cada 2 s   -> situação de cada área (com 2 ou mais)
       /api/historico  a cada 4 s   -> indicadores, gráfico e tabela de eventos
       /exportar.csv   ao clicar    -> baixa o histórico numa planilha
+
+  LOGIN: a própria página pede usuário e senha (tela de login) e os
+  manda no cabeçalho de CADA consulta, como o login do navegador faria.
+  Nada é enviado por POST: o painel continua só com pedidos GET. O login
+  fica guardado só nesta aba (sessionStorage) e some ao fechá-la ou em
+  "Sair". As imagens também são buscadas com o login (por isso não usam
+  o endereço direto no <img>).
 
   Não existe nenhum botão ou chamada que altere o sistema.
 -->
@@ -113,6 +128,73 @@
   }
 
   .botao-tema:hover { background: var(--cartao-hover); }
+
+  /* ============================================================
+     TELA DE LOGIN (por cima de tudo, até entrar)
+     ============================================================ */
+  .tela-login {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: grid;
+    place-items: center;
+    background: var(--fundo);
+    padding: 16px;
+  }
+
+  .tela-login[hidden] { display: none; }
+
+  .cartao-login {
+    width: min(380px, 100%);
+    background: var(--painel);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    padding: 28px 24px;
+  }
+
+  .cartao-login svg { width: 44px; height: 44px; display: block; margin-bottom: 12px; }
+  .cartao-login h1 { margin: 0 0 4px; font-size: 20px; }
+  .cartao-login p { margin: 0 0 18px; color: var(--texto-suave); }
+  .cartao-login label { display: block; font-size: 12px; color: var(--texto-suave); margin: 12px 0 4px; }
+
+  .cartao-login input {
+    width: 100%;
+    background: var(--cartao);
+    color: var(--texto);
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font: inherit;
+  }
+
+  .cartao-login button {
+    width: 100%;
+    margin-top: 20px;
+    background: var(--destaque);
+    color: #fff;
+    border: 0;
+    border-radius: 6px;
+    padding: 11px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .cartao-login button:disabled { opacity: .6; cursor: wait; }
+
+  .erro-login { color: var(--perigo-claro); min-height: 20px; margin-top: 12px; font-size: 13px; }
+
+  /* Filtros de área e de datas */
+  .filtros select, .filtros input[type="date"] {
+    background: var(--cartao);
+    color: var(--texto);
+    border: 1px solid var(--borda);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+  }
+
+  .filtros .datas { display: inline-flex; align-items: center; gap: 6px; color: var(--texto-suave); font-size: 12px; }
 
   /* ============================================================
      CABEÇALHO
@@ -446,6 +528,28 @@
 
 <body>
 
+<!-- ====================== TELA DE LOGIN ====================== -->
+<div class="tela-login" id="tela-login" hidden>
+  <form class="cartao-login" id="formulario-login">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M50 4 88 17v31l-8 22-30 26-30-26-8-22V17Z" fill="#3b82f6"/>
+      <path d="M50 4 88 17v31l-8 22-30 26Z" fill="#2563eb"/>
+      <path d="M31 50 45 64 71 36" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h1>SafeTech Entry</h1>
+    <p>Painel do gerente · somente leitura</p>
+
+    <label for="campo-usuario">Usuário</label>
+    <input id="campo-usuario" autocomplete="username" required>
+
+    <label for="campo-senha">Senha</label>
+    <input id="campo-senha" type="password" autocomplete="current-password" required>
+
+    <button type="submit" id="botao-entrar">Entrar</button>
+    <div class="erro-login" id="erro-login" role="alert"></div>
+  </form>
+</div>
+
 <header>
   <div class="marca">
     <!-- Escudo com "visto": o mesmo ícone do aplicativo de mesa -->
@@ -461,6 +565,7 @@
   <div class="conexao">
     <!-- Só muda a aparência NESTE navegador: nada é enviado ao sistema -->
     <button type="button" class="botao-tema" id="botao-tema"></button>
+    <button type="button" class="botao-tema" id="botao-sair" hidden>Sair</button>
     <span class="relogio" id="relogio"></span>
     <span class="ponto" id="ponto-conexao"></span>
     <span id="texto-conexao">Conectando...</span>
@@ -539,9 +644,16 @@
       <button type="button" data-filtro="todos" aria-pressed="true">Todos</button>
       <button type="button" data-filtro="SIM" aria-pressed="false">Conformes</button>
       <button type="button" data-filtro="NAO" aria-pressed="false">Irregulares</button>
-      <input type="search" id="busca" placeholder="Buscar por data, pessoa, setor, EPI..." aria-label="Buscar eventos">
+      <select id="filtro-area" aria-label="Área">
+        <option value="">Todas as áreas</option>
+      </select>
+      <span class="datas">
+        de <input type="date" id="filtro-de" aria-label="Desde a data">
+        até <input type="date" id="filtro-ate" aria-label="Até a data">
+      </span>
+      <input type="search" id="busca" placeholder="Buscar por pessoa, setor, EPI..." aria-label="Buscar eventos">
       <!-- Só baixa um arquivo (GET): o painel continua somente leitura -->
-      <a class="botao" href="/exportar.csv" download>Exportar CSV</a>
+      <button type="button" class="botao" id="botao-exportar">Exportar CSV</button>
     </div>
 
     <div class="rolagem">
@@ -583,6 +695,127 @@
 
 const el = (id) => document.getElementById(id);
 
+// ============================================================
+// LOGIN E CONSULTAS AO SERVIDOR
+// ============================================================
+//
+// Todas as consultas passam por buscar(): ela manda o login guardado
+// (se houver) e o cabeçalho que avisa o servidor que o pedido é desta
+// página (assim um login errado não abre a janelinha do navegador).
+
+const CHAVE_LOGIN = "safetech-login";
+
+let login = lerLogin();
+let conectado = false;
+
+function lerLogin() {
+  try { return sessionStorage.getItem(CHAVE_LOGIN); } catch (erro) { return null; }
+}
+
+function guardarLogin(valor) {
+  login = valor;
+  try {
+    if (valor) sessionStorage.setItem(CHAVE_LOGIN, valor);
+    else sessionStorage.removeItem(CHAVE_LOGIN);
+  } catch (erro) { /* só não lembra ao recarregar */ }
+}
+
+function cabecalhos() {
+  const lista = { "X-SafeTech-Painel": "1" };
+  if (login) lista.Authorization = "Basic " + login;
+  return lista;
+}
+
+// Erro de login: a tela de login volta (com o motivo)
+class SemLogin extends Error {}
+
+async function buscar(endereco) {
+  const resposta = await fetch(endereco, { cache: "no-store", headers: cabecalhos() });
+
+  if (resposta.status === 401) {
+    mostrarLogin(login ? "Usuário ou senha incorretos." : "");
+    throw new SemLogin();
+  }
+
+  if (resposta.status === 429) {
+    const minutos = Math.ceil((Number(resposta.headers.get("Retry-After")) || 60) / 60);
+    mostrarLogin("Muitas tentativas erradas. Tente de novo em " + minutos + " minuto(s).");
+    throw new SemLogin();
+  }
+
+  if (!resposta.ok) throw new Error(resposta.status);
+
+  return resposta;
+}
+
+// Imagens também precisam do login: são buscadas e mostradas pelo
+// endereço local (objectURL). As fotos de evidência não mudam: ficam
+// guardadas para não baixar de novo a cada redesenho da tabela.
+const fotosGuardadas = new Map();
+
+async function carregarImagem(imagem, endereco, guardar) {
+  try {
+    if (guardar && fotosGuardadas.has(endereco)) {
+      imagem.src = fotosGuardadas.get(endereco);
+      return;
+    }
+
+    const local = URL.createObjectURL(await (await buscar(endereco)).blob());
+
+    if (guardar) {
+      fotosGuardadas.set(endereco, local);
+    } else if (imagem.dataset.local) {
+      URL.revokeObjectURL(imagem.dataset.local);   // libera a imagem anterior
+    }
+
+    imagem.dataset.local = guardar ? "" : local;
+    imagem.src = local;
+  } catch (erro) {
+    // Sem imagem (câmera desligada, foto apagada): fica como está
+  }
+}
+
+function mostrarLogin(mensagem) {
+  conectado = false;
+  el("tela-login").hidden = false;
+  el("erro-login").textContent = mensagem || "";
+  el("botao-entrar").disabled = false;
+  el("campo-senha").value = "";
+  (el("campo-usuario").value ? el("campo-senha") : el("campo-usuario")).focus();
+}
+
+function entrouNoPainel() {
+  conectado = true;
+  el("tela-login").hidden = true;
+  el("botao-sair").hidden = !login;
+  assinaturaHistorico = "";
+  atualizarTudo();
+}
+
+el("formulario-login").addEventListener("submit", async (evento) => {
+  evento.preventDefault();   // nada de POST: o login vai no cabeçalho das consultas
+
+  el("botao-entrar").disabled = true;
+  el("erro-login").textContent = "";
+
+  // "usuario:senha" em base64 (o formato do login Basic), com acentos certos
+  const texto = el("campo-usuario").value.trim() + ":" + el("campo-senha").value;
+  guardarLogin(btoa(String.fromCharCode(...new TextEncoder().encode(texto))));
+
+  try {
+    await buscar("/api/login");
+    entrouNoPainel();
+  } catch (erro) {
+    guardarLogin(null);
+    if (!(erro instanceof SemLogin)) mostrarLogin("Sem conexão com o aplicativo.");
+  }
+});
+
+el("botao-sair").addEventListener("click", () => {
+  guardarLogin(null);
+  mostrarLogin("Você saiu do painel.");
+});
+
 const INTERVALO_AO_VIVO_MS = 1000;
 const INTERVALO_AREAS_MS = 2000;
 const INTERVALO_HISTORICO_MS = 4000;
@@ -618,12 +851,13 @@ function marcarConexao(ok) {
 // ============================================================
 
 async function atualizarAoVivo() {
+  if (!conectado) return;
   try {
-    const resposta = await fetch("/api/ao-vivo", { cache: "no-store" });
-    if (!resposta.ok) throw new Error(resposta.status);
+    const resposta = await buscar("/api/ao-vivo");
     desenharAoVivo(await resposta.json());
     marcarConexao(true);
   } catch (erro) {
+    if (erro instanceof SemLogin) return;
     marcarConexao(false);
     mostrarSemVideo("Sem conexão com o aplicativo.");
   }
@@ -662,7 +896,7 @@ function desenharAoVivo(dados) {
   // A imagem é buscada de novo a cada ciclo; o número no endereço
   // impede o navegador de reaproveitar a imagem anterior.
   const imagem = el("imagem-ao-vivo");
-  imagem.src = "/ao-vivo.jpg?t=" + Date.now();
+  carregarImagem(imagem, "/ao-vivo.jpg?t=" + Date.now(), false);
   imagem.hidden = false;
   el("mensagem-video").hidden = true;
   el("selo-ao-vivo").hidden = false;
@@ -703,9 +937,9 @@ function desenharAoVivo(dados) {
 // ============================================================
 
 async function atualizarAreas() {
+  if (!conectado) return;
   try {
-    const resposta = await fetch("/api/areas", { cache: "no-store" });
-    if (!resposta.ok) throw new Error(resposta.status);
+    const resposta = await buscar("/api/areas");
     desenharAreas(await resposta.json());
   } catch (erro) {
     // A falha de conexão já é mostrada pelo ciclo do "ao vivo"
@@ -728,7 +962,7 @@ function desenharAreas(areas) {
     if (area.camera_ativa) {
       const imagem = criar("img");
       // O número no endereço impede o navegador de reaproveitar a imagem anterior
-      imagem.src = "/ao-vivo.jpg?area=" + area.indice + "&t=" + Date.now();
+      carregarImagem(imagem, "/ao-vivo.jpg?area=" + area.indice + "&t=" + Date.now(), false);
       imagem.alt = "Imagem atual da área " + area.area;
       cartao.append(imagem);
     } else {
@@ -800,18 +1034,54 @@ function atualizarRelogio() {
 // HISTÓRICO (indicadores, gráfico e tabela)
 // ============================================================
 
+// Filtros de área e de datas vão para o servidor (ele filtra antes de
+// separar os mais recentes); resultado e busca são filtrados aqui
+function consultaDoHistorico() {
+  const parametros = new URLSearchParams();
+  if (el("filtro-area").value) parametros.set("area", el("filtro-area").value);
+  if (el("filtro-de").value) parametros.set("de", el("filtro-de").value);
+  if (el("filtro-ate").value) parametros.set("ate", el("filtro-ate").value);
+  const texto = parametros.toString();
+  return "/api/historico" + (texto ? "?" + texto : "");
+}
+
+let totalFiltrado = 0;
+
+function preencherAreas(areas) {
+  const lista = el("filtro-area");
+  const escolhida = lista.value;
+  const atuais = Array.from(lista.options).slice(1).map((opcao) => opcao.value);
+
+  if (atuais.join("|") === areas.join("|")) return;
+
+  lista.replaceChildren(criar("option", "Todas as áreas"));
+  lista.options[0].value = "";
+
+  for (const area of areas) {
+    const opcao = criar("option", area);
+    opcao.value = area;
+    lista.append(opcao);
+  }
+
+  lista.value = areas.includes(escolhida) ? escolhida : "";
+}
+
 async function atualizarHistorico() {
+  if (!conectado) return;
   try {
-    const resposta = await fetch("/api/historico", { cache: "no-store" });
-    if (!resposta.ok) throw new Error(resposta.status);
+    const consulta = consultaDoHistorico();
+    const resposta = await buscar(consulta);
     const dados = await resposta.json();
 
-    // Só redesenha quando chegou evento novo (ou virou o dia)
-    const assinatura = dados.geral.total + "|" + (dados.eventos[0]?.timestamp || "") + "|" + dados.gerado_em.slice(0, 10);
+    // Só redesenha quando chegou evento novo, virou o dia ou o filtro mudou
+    const assinatura = consulta + "|" + dados.geral.total + "|" + (dados.eventos[0]?.timestamp || "") + "|" + dados.gerado_em.slice(0, 10);
     if (assinatura === assinaturaHistorico) return;
     assinaturaHistorico = assinatura;
 
     eventos = dados.eventos;
+    totalFiltrado = dados.filtrados;
+
+    preencherAreas(dados.areas || []);
 
     desenharIndicadores(dados);
     desenharGrafico(dados.por_hora);
@@ -977,9 +1247,8 @@ function desenharTabela() {
     const celulaFoto = criar("td");
     if (evento.imagem) {
       const miniatura = criar("img");
-      miniatura.src = "/imagens/" + encodeURIComponent(evento.imagem);
       miniatura.alt = "";
-      miniatura.loading = "lazy";
+      carregarImagem(miniatura, "/imagens/" + encodeURIComponent(evento.imagem), true);
       celulaFoto.append(miniatura);
     }
 
@@ -989,7 +1258,7 @@ function desenharTabela() {
 
     linha.append(
       celulaFoto,
-      criar("td", evento.timestamp, "numero"),
+      criar("td", evento.horario || evento.timestamp, "numero"),
       criar("td", evento.pessoa),
       criar("td", evento.setor),
       criar("td", evento.exigidos || "-"),
@@ -1005,7 +1274,7 @@ function desenharTabela() {
   }
 
   el("tabela-vazia").hidden = visiveis.length > 0;
-  el("contagem-eventos").textContent = visiveis.length + " de " + eventos.length + " mais recentes";
+  el("contagem-eventos").textContent = visiveis.length + " na tela · " + totalFiltrado + " no filtro (até " + eventos.length + " mais recentes)";
 }
 
 function abrirFoto(evento) {
@@ -1013,11 +1282,11 @@ function abrirFoto(evento) {
 
   const liberado = evento.liberado === "SIM";
 
-  el("foto-grande").src = "/imagens/" + encodeURIComponent(evento.imagem);
+  carregarImagem(el("foto-grande"), "/imagens/" + encodeURIComponent(evento.imagem), true);
 
   el("detalhes-foto").replaceChildren(
     criar("span", evento.resultado, "marcador " + (liberado ? "liberado" : "negado")),
-    criar("strong", evento.timestamp),
+    criar("strong", (evento.horario || evento.timestamp) + (evento.fuso ? " (UTC" + evento.fuso + ")" : "")),
     criar("span", "Área: " + (evento.area || "-") + " · Modo: " + evento.nome_modo),
     criar("span", "Pessoa " + evento.pessoa),
     criar("span", "Setor: " + evento.setor),
@@ -1045,6 +1314,27 @@ for (const botao of document.querySelectorAll(".filtros button")) {
 
 el("busca").addEventListener("input", desenharTabela);
 
+// Área e datas: busca de novo no servidor
+for (const campo of ["filtro-area", "filtro-de", "filtro-ate"]) {
+  el(campo).addEventListener("change", () => { assinaturaHistorico = ""; atualizarHistorico(); });
+}
+
+// Exportar: a planilha também precisa do login, então é baixada por aqui
+el("botao-exportar").addEventListener("click", async () => {
+  try {
+    const resposta = await buscar("/exportar.csv");
+    const nome = (resposta.headers.get("Content-Disposition") || "").match(/filename="(.+)"/)?.[1] || "auditoria_safetech.csv";
+    const local = URL.createObjectURL(await resposta.blob());
+    const link = criar("a");
+    link.href = local;
+    link.download = nome;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(local), 1000);
+  } catch (erro) {
+    // A tela de login (ou o aviso de conexão) já aparece
+  }
+});
+
 // Clicar fora da foto fecha a janela
 el("janela-foto").addEventListener("click", (evento) => {
   if (evento.target === el("janela-foto")) el("janela-foto").close();
@@ -1055,10 +1345,23 @@ el("janela-foto").addEventListener("click", (evento) => {
 // INÍCIO: busca os dados agora e depois em intervalos fixos
 // ============================================================
 
+function atualizarTudo() {
+  atualizarAoVivo();
+  atualizarAreas();
+  atualizarHistorico();
+}
+
 atualizarRelogio();
-atualizarAoVivo();
-atualizarAreas();
-atualizarHistorico();
+
+// Primeiro confere o login: guardado nesta aba, ou nenhum (se o painel
+// estiver sem senha, entra direto; senão aparece a tela de login)
+buscar("/api/login")
+  .then(entrouNoPainel)
+  .catch((erro) => {
+    if (!(erro instanceof SemLogin)) {
+      mostrarLogin("Sem conexão com o aplicativo.");
+    }
+  });
 
 setInterval(atualizarRelogio, 1000);
 setInterval(atualizarAoVivo, INTERVALO_AO_VIVO_MS);

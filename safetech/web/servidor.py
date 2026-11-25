@@ -11,6 +11,22 @@ Roda em uma thread própria, dentro do aplicativo, e entrega:
                          (?area=N: a imagem da área N da lista de /api/areas)
     /imagens/<nome>   -> foto de evidência de um evento
     /exportar.csv     -> o histórico inteiro numa planilha (download)
+    /api/login        -> só confere o login (a página de login usa)
+
+Públicas (sem login, porque não têm dados): a própria página (que mostra
+a tela de login), o manifesto e os ícones para instalar no celular.
+
+    /manifest.webmanifest, /icone-192.png, /icone-512.png, /apple-touch-icon.png
+
+A tela de login é da própria página: ela manda usuário e senha no
+cabeçalho de cada consulta (o mesmo login Basic de sempre), sem nenhum
+POST. Quando o pedido vem dela (cabeçalho X-SafeTech-Painel), um login
+errado responde 401 SEM pedir senha ao navegador, para não abrir a
+janelinha de login do navegador por cima da página.
+
+LOGIN: usuário e senha conferidos pelo hash (acesso_web). Depois de
+vários logins errados, o aparelho que tentou fica bloqueado por alguns
+minutos (resposta 429), para ninguém adivinhar a senha na força bruta.
 
 SOMENTE LEITURA: o servidor só aceita pedidos GET. Qualquer outro
 método (POST, PUT, DELETE...) é recusado, e nenhuma rota altera
@@ -20,6 +36,7 @@ configurações, apaga registros ou controla a câmera.
 import base64
 import hashlib
 import json
+import logging
 import socket
 import threading
 from dataclasses import asdict
@@ -32,14 +49,65 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import cv2
 
 from safetech import config
-from safetech.nucleo import anotacao, modos
+from safetech.nucleo import anotacao, horario, modos
+from safetech.nucleo.icones import desenhar_escudo
 from safetech.nucleo.epis import nome_do_epi
 from safetech.nucleo.tipos import EstadoCena, StatusPessoa
 from safetech.servicos import acesso_web
 from safetech.servicos.auditoria import gerar_csv_exportacao
 
 
+log = logging.getLogger(__name__)
+
+
 ARQUIVO_PAGINA = Path(__file__).resolve().parent / "painel.html"
+
+# Cabeçalho que a página manda: o 401 dela não abre a janela do navegador
+CABECALHO_DA_PAGINA = "X-SafeTech-Painel"
+
+# Cor de fundo do ícone e da barra do celular (a do tema escuro)
+COR_FUNDO_ICONE = "#0f1318"
+
+# Rotas sem dados, liberadas sem login
+ROTAS_PUBLICAS = {"/", "/manifest.webmanifest", "/icone-192.png", "/icone-512.png", "/apple-touch-icon.png"}
+
+# Tamanho de cada ícone público (px)
+TAMANHOS_ICONES = {"/icone-192.png": 192, "/icone-512.png": 512, "/apple-touch-icon.png": 180}
+
+_icones_prontos = {}
+
+
+def icone_png(tamanho) -> bytes:
+    """O escudo do SafeTech em PNG, com fundo (ícone de app no celular)."""
+
+    if tamanho not in _icones_prontos:
+
+        import io
+
+        memoria = io.BytesIO()
+
+        desenhar_escudo(tamanho, fundo=COR_FUNDO_ICONE).save(memoria, format="PNG")
+
+        _icones_prontos[tamanho] = memoria.getvalue()
+
+    return _icones_prontos[tamanho]
+
+
+def manifesto() -> dict:
+    """Manifesto do "aplicativo" do painel (nome, ícones, cores) para instalar no celular."""
+
+    return {
+        "name": f"{config.NOME_PRODUTO} - Painel do gerente",
+        "short_name": config.NOME_PRODUTO,
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": COR_FUNDO_ICONE,
+        "theme_color": COR_FUNDO_ICONE,
+        "icons": [
+            {"src": "/icone-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/icone-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    }
 
 
 class ServidorWeb:
@@ -79,6 +147,9 @@ class ServidorWeb:
         # navegador manda o login a cada pedido, várias vezes por segundo.
         self._logins_aceitos = set()
 
+        # Logins errados por aparelho (endereço), para bloquear quem insiste
+        self.tentativas = acesso_web.LimiteDeTentativas()
+
         self._servidor = None
         self._thread = None
 
@@ -114,6 +185,50 @@ class ServidorWeb:
             self._servidor.server_close()
 
             self._servidor = None
+
+    def verificar_login(self, cabecalho, endereco):
+        """
+        Decide o que fazer com um pedido. Devolve (situacao, segundos):
+
+            ("ok", 0)          -> pode entrar
+            ("pedir_login", 0) -> sem login ou login errado: o navegador pergunta
+            ("bloqueado", s)   -> errou demais: espere s segundos
+
+        endereco -> IP de quem pediu (cada aparelho tem o seu limite).
+        """
+
+        if not self._ajustes.exige_login:
+            return "ok", 0
+
+        espera = self.tentativas.bloqueado_por(endereco)
+
+        if espera > 0:
+            return "bloqueado", espera
+
+        # Sem login nenhum: é o navegador perguntando antes (não é erro)
+        if not cabecalho.startswith("Basic "):
+            return "pedir_login", 0
+
+        if self.autoriza(cabecalho):
+
+            self.tentativas.registrar_sucesso(endereco)
+
+            return "ok", 0
+
+        log.warning("Login errado no painel web vindo de %s", endereco)
+
+        if self.tentativas.registrar_falha(endereco):
+
+            log.warning(
+                "%s bloqueado no painel web por %d s depois de %d logins errados",
+                endereco,
+                config.PAINEL_WEB_BLOQUEIO_SEG,
+                config.PAINEL_WEB_TENTATIVAS_MAXIMAS,
+            )
+
+            return "bloqueado", config.PAINEL_WEB_BLOQUEIO_SEG
+
+        return "pedir_login", 0
 
     def autoriza(self, cabecalho) -> bool:
         """
@@ -211,23 +326,29 @@ class ServidorWeb:
             ],
         }
 
-    def dados_historico(self) -> dict:
-        """Totais, eventos por hora de hoje e os eventos mais recentes."""
+    def dados_historico(self, area=None, de=None, ate=None) -> dict:
+        """
+        Totais, eventos por hora de hoje e os eventos mais recentes.
+
+        area, de, ate -> filtros da LISTA de eventos (área e datas
+                         "AAAA-MM-DD", inclusive). Os totais de hoje e do
+                         histórico continuam sendo de tudo.
+        """
 
         registros = self._auditoria.carregar_historico()
 
         hoje = datetime.now().strftime("%Y-%m-%d")
 
-        registros_hoje = [r for r in registros if r.timestamp.startswith(hoje)]
+        registros_hoje = [r for r in registros if horario.data(r.timestamp) == hoje]
 
         # Uma posição por hora do dia (0h a 23h)
         por_hora = [{"hora": hora, "liberados": 0, "negados": 0} for hora in range(24)]
 
         for registro in registros_hoje:
 
-            try:
-                hora = int(registro.timestamp[11:13])
-            except ValueError:
+            hora = horario.hora(registro.timestamp)
+
+            if hora is None:
                 continue
 
             chave = "liberados" if registro.liberado == "SIM" else "negados"
@@ -235,7 +356,15 @@ class ServidorWeb:
             por_hora[hora][chave] += 1
 
         # Mais recentes primeiro, limitado para a página não pesar
-        recentes = registros[::-1][: config.PAINEL_WEB_MAXIMO_EVENTOS]
+        filtrados = [
+            registro
+            for registro in registros
+            if (not area or registro.area == area)
+            and (not de or horario.data(registro.timestamp) >= de)
+            and (not ate or horario.data(registro.timestamp) <= ate)
+        ]
+
+        recentes = filtrados[::-1][: config.PAINEL_WEB_MAXIMO_EVENTOS]
 
         return {
             "gerado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -244,11 +373,17 @@ class ServidorWeb:
             "por_hora": por_hora,
             # Cada evento leva também o resultado já em texto, conforme o
             # modo em que aconteceu ("Liberado" ou "Conforme", por exemplo)
+            # Para a lista de áreas do filtro, e quantos eventos passaram nele
+            "areas": sorted({registro.area for registro in registros}),
+            "filtrados": len(filtrados),
             "eventos": [
                 {
                     **asdict(registro),
                     "resultado": modos.resultado(registro.modo, registro.liberado == "SIM"),
                     "nome_modo": modos.nome_do_modo(registro.modo),
+                    # Para mostrar: sem o "T"; o fuso vai à parte
+                    "horario": horario.para_exibir(registro.timestamp),
+                    "fuso": horario.fuso(registro.timestamp),
                 }
                 for registro in recentes
             ],
@@ -368,22 +503,56 @@ class _TratadorPainel(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
-        if not self._autorizado():
-            self._pedir_login()
-            return
-
         partes = urlsplit(self.path)
 
         rota = unquote(partes.path)
 
+        # ---------------- públicas: a página, o manifesto e os ícones ----------------
+
         if rota == "/":
             self._enviar(ARQUIVO_PAGINA.read_bytes(), "text/html; charset=utf-8")
+            return
+
+        if rota == "/manifest.webmanifest":
+            self._enviar(json.dumps(manifesto(), ensure_ascii=False).encode("utf-8"), "application/manifest+json")
+            return
+
+        if rota in TAMANHOS_ICONES:
+            self._enviar(icone_png(TAMANHOS_ICONES[rota]), "image/png", cache="max-age=86400")
+            return
+
+        # ---------------- o resto precisa de login ----------------
+
+        situacao, espera = self.painel.verificar_login(
+            self.headers.get("Authorization", ""),
+            self.client_address[0],
+        )
+
+        if situacao == "bloqueado":
+            self._recusar_bloqueado(espera)
+            return
+
+        if situacao != "ok":
+            self._pedir_login()
+            return
+
+        if rota == "/api/login":
+            self._enviar_json({"ok": True})
 
         elif rota == "/api/ao-vivo":
             self._enviar_json(self.painel.dados_ao_vivo())
 
         elif rota == "/api/historico":
-            self._enviar_json(self.painel.dados_historico())
+
+            consulta = parse_qs(partes.query)
+
+            def valor(nome):
+                return (consulta.get(nome) or [""])[0] or None
+
+            # Datas só no formato AAAA-MM-DD (outra coisa é ignorada)
+            de, ate = (horario.ler_data_digitada(valor(nome) or "") for nome in ("de", "ate"))
+
+            self._enviar_json(self.painel.dados_historico(area=valor("area"), de=de, ate=ate))
 
         elif rota == "/api/areas":
             self._enviar_json(self.painel.dados_areas())
@@ -438,14 +607,34 @@ class _TratadorPainel(BaseHTTPRequestHandler):
     # LOGIN
     # ------------------------------------------------------
 
-    def _autorizado(self) -> bool:
+    def _recusar_bloqueado(self, espera):
+        """429: errou o login vezes demais; o navegador é avisado de quando pode voltar."""
 
-        return self.painel.autoriza(self.headers.get("Authorization", ""))
+        minutos = max(1, round(espera / 60))
+
+        corpo = f"Muitas tentativas de login erradas. Tente de novo em {minutos} minuto(s).".encode("utf-8")
+
+        self.send_response(HTTPStatus.TOO_MANY_REQUESTS)
+        self.send_header("Retry-After", str(int(espera) + 1))
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(corpo)))
+        self.end_headers()
+
+        try:
+            self.wfile.write(corpo)
+        except (BrokenPipeError, ConnectionError):
+            pass
 
     def _pedir_login(self):
 
         self.send_response(HTTPStatus.UNAUTHORIZED)
-        self.send_header("WWW-Authenticate", 'Basic realm="SafeTech Entry", charset="UTF-8"')
+
+        # A página tem a sua tela de login: sem este cabeçalho, o navegador
+        # não abre a janelinha dele por cima. Outros clientes (curl, a
+        # catraca) continuam recebendo o pedido de login de sempre.
+        if not self.headers.get(CABECALHO_DA_PAGINA):
+            self.send_header("WWW-Authenticate", 'Basic realm="SafeTech Entry", charset="UTF-8"')
+
         self.send_header("Content-Length", "0")
         self.end_headers()
 

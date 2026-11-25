@@ -31,7 +31,7 @@ from datetime import datetime
 import cv2
 
 from safetech import config
-from safetech.nucleo import modos
+from safetech.nucleo import horario, modos
 from safetech.nucleo.epis import nome_do_epi, nomes_dos_epis
 from safetech.nucleo.tipos import RegistroAuditoria
 
@@ -193,7 +193,7 @@ class ServicoAuditoria:
         area                -> nome da área (câmera) do evento
         """
 
-        agora = datetime.now()
+        agora = horario.agora()
 
         nome_imagem = ""
 
@@ -205,7 +205,8 @@ class ServicoAuditoria:
             )
 
         registro = RegistroAuditoria(
-            timestamp=agora.strftime("%Y-%m-%d %H:%M:%S"),
+            # ISO 8601 com o fuso, ex.: 2026-11-25T09:18:51-03:00
+            timestamp=agora.isoformat(timespec="seconds"),
             evento=evento,
             pessoa=f"P{identificador_pessoa:03d}",
             setor=setor,
@@ -362,7 +363,7 @@ class ServicoAuditoria:
                     escritor.writerow(COLUNAS_EXCLUIDOS)
 
                 escritor.writerow(
-                    linha_procurada + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                    linha_procurada + [horario.agora_iso()]
                 )
 
             foto = self._pasta_imagens / registro.imagem if registro.imagem else None
@@ -425,7 +426,7 @@ class ServicoAuditoria:
 
 # (título da coluna, como obter o valor do registro)
 COLUNAS_EXPORTACAO = [
-    ("Data e hora", lambda r: r.timestamp),
+    ("Data e hora", lambda r: horario.para_exibir(r.timestamp)),
     ("Área", lambda r: r.area),
     ("Modo", lambda r: modos.nome_do_modo(r.modo)),
     ("Evento", lambda r: "Entrada" if r.evento == EVENTO_ENTRADA else "Mudança"),
@@ -436,6 +437,8 @@ COLUNAS_EXPORTACAO = [
     ("Resultado", lambda r: modos.resultado(r.modo, r.liberado == "SIM")),
     ("Confiança", lambda r: r.confiancas),
     ("Foto", lambda r: r.imagem),
+    # Fuso da "Data e hora" (ex.: -03:00); vazio nos eventos antigos, sem fuso
+    ("Fuso (UTC)", lambda r: horario.fuso(r.timestamp)),
 ]
 
 

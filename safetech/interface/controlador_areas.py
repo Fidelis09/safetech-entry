@@ -19,9 +19,10 @@ auditoria de qual área mostrar.
 
 import logging
 import time
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
 from safetech import config
+from safetech.interface import dialogos
 from safetech.interface.area_monitorada import AreaMonitorada
 from safetech.interface.componentes import BarraAreas
 from safetech.interface.dialogo_area import pedir_area
@@ -79,6 +80,10 @@ class ControladorAreas:
 
         # Próxima conferência dos pontos de situação da barra
         self._proxima_conferencia_pontos = 0.0
+
+        # True depois de restaurar um backup: nada mais é gravado, para
+        # não sobrescrever as configurações restauradas ao fechar
+        self.nao_salvar_mais = False
 
     # ============================================================
     # MONTAGEM (o lado esquerdo da janela, abaixo do título)
@@ -177,6 +182,9 @@ class ControladorAreas:
             ao_alternar_camera=lambda: self.cameras.alternar(area),
             ao_capturar_foto=lambda: self.cameras.capturar_foto(area),
             ao_trocar_camera=lambda: self.cameras.trocar_da_area(area),
+            ao_alternar_calibracao=lambda ligado: self.alternar_calibracao(area, ligado),
+            ao_mudar_limiar=lambda valor: self.mudar_parametros(valor, self.intervalo),
+            limiar_inicial=self.limiar,
         )
 
         # Entra antes da página "+ Nova área", que fica sempre por último
@@ -353,7 +361,7 @@ class ControladorAreas:
         configuracoes = self._janela.configuracoes
 
         if len(self.lista) >= config.MAXIMO_AREAS:
-            self._janela.avisar(f"Limite de {config.MAXIMO_AREAS} áreas abertas ao mesmo tempo (MAXIMO_AREAS).", segundos=7)
+            self._janela.avisar(f"Limite de {config.MAXIMO_AREAS} áreas abertas ao mesmo tempo (MAXIMO_AREAS).", segundos=7, tipo="alerta")
             return
 
         opcoes = configuracoes.opcoes_de_camera()
@@ -400,6 +408,7 @@ class ControladorAreas:
                 f"Área \"{nome}\" criada. Atenção: a área \"{outra.nome}\" usa a mesma webcam; "
                 "só uma delas consegue ligá-la de cada vez.",
                 segundos=10,
+                tipo="alerta",
             )
         else:
             self._janela.avisar(f"Área \"{nome}\" criada. Escolha o setor, o modo e ligue a câmera.", segundos=7)
@@ -420,6 +429,11 @@ class ControladorAreas:
 
         nome, _ = resposta
 
+        self.definir_nome(area, nome)
+
+    def definir_nome(self, area, nome):
+        """Troca o nome da área (Renomear ou assistente). Quem chama já conferiu que não repete."""
+
         log.info("Área renomeada: %s -> %s", area.nome, nome)
 
         # Os próximos eventos da auditoria já saem com o nome novo
@@ -428,7 +442,7 @@ class ControladorAreas:
 
         # Os eventos de antes continuam com o nome antigo (o log não é
         # reescrito); a auditoria passa a mostrar os do nome novo
-        if not self.visao_geral_na_tela():
+        if area is self.atual and not self.visao_geral_na_tela():
             self._janela.painel_auditoria.definir_area(nome)
 
         self.atualizar_textos()
@@ -443,13 +457,14 @@ class ControladorAreas:
 
         area = self.atual
 
-        confirmou = messagebox.askyesno(
+        confirmou = dialogos.confirmar(
+            self._janela.configuracoes.pai_para_dialogos(self._janela.raiz),
             "Remover área",
             f"Remover a área \"{area.nome}\"?\n\n"
             "A câmera dela é desligada. Os eventos que ela já registrou "
             "continuam na auditoria.",
-            default="no",
-            parent=self._janela.configuracoes.pai_para_dialogos(self._janela.raiz),
+            texto_confirmar="Remover área",
+            perigoso=True,
         )
 
         if not confirmou:
@@ -624,6 +639,18 @@ class ControladorAreas:
                 segundos=7,
             )
 
+    def alternar_calibracao(self, area, ligado):
+        """Botão "Calibrar" de uma área: barras de confiança de cada EPI no vídeo dela."""
+
+        area.calibracao = ligado
+        area.esquecer_desenho()
+
+        if ligado:
+            self._janela.avisar(
+                f"Calibração na área \"{area.nome}\": ajuste a confiança mínima e veja as barras mudarem.",
+                segundos=7,
+            )
+
     # ============================================================
     # CONFIANÇA MÍNIMA E INTERVALO (todas as áreas)
     # ============================================================
@@ -645,6 +672,15 @@ class ControladorAreas:
             area.parametros.limiar_confianca = limiar_confianca
             area.parametros.intervalo_classificacao = intervalo_classificacao
 
+            # O controle do modo calibração de cada área acompanha
+            area.painel.definir_limiar(limiar_confianca)
+
+            # As barras mudam de cor na hora
+            area.esquecer_desenho()
+
+        # E o controle de Configurações > Análise também
+        self._janela.configuracoes.definir_limiar(limiar_confianca)
+
         raiz = self._janela.raiz
 
         if self._gravacao_de_ajustes is not None:
@@ -655,6 +691,9 @@ class ControladorAreas:
     def _salvar_ajustes(self):
 
         self._gravacao_de_ajustes = None
+
+        if self.nao_salvar_mais:
+            return
 
         preferencias.salvar_ajustes(self.limiar, self.intervalo)
 
@@ -689,10 +728,28 @@ class ControladorAreas:
 
         for area in self.lista:
             area.esquecer_desenho()
+            area.painel.atualizar_icones()
 
         self._proxima_conferencia_pontos = 0.0
 
+    def sobrecarregadas(self, agora):
+        """Áreas com a análise lenta há algum tempo: lista de (área, análises por segundo)."""
+
+        resultado = []
+
+        for area in self.lista:
+
+            analises = area.verificar_sobrecarga(agora)
+
+            if analises is not None:
+                resultado.append((area, analises))
+
+        return resultado
+
     def salvar(self):
+
+        if self.nao_salvar_mais:
+            return
 
         preferencias.salvar_areas([area.dados for area in self.lista])
 

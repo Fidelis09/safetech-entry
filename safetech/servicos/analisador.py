@@ -23,10 +23,9 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
 
 from safetech import config
-from safetech.nucleo import anotacao, decisao, modos
+from safetech.nucleo import anotacao, decisao, horario, modos
 from safetech.nucleo.rastreador import RastreadorPessoas
 from safetech.nucleo.tipos import EstadoCena, PessoaObservada, StatusPessoa
 from safetech.servicos import auditoria as modulo_auditoria
@@ -581,9 +580,12 @@ class Analisador:
 
         resultado = modos.resultado(self._modo_em_uso, liberado)
 
+        agora = horario.agora_iso()
+
         partes = [
             config.NOME_PRODUTO,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            # Data e hora com o fuso, ex.: 2026-11-25 09:18:51 UTC-03:00
+            f"{horario.para_exibir(agora)} UTC{horario.fuso(agora)}",
             f"Area: {self._parametros.area}",
             f"P{identificador:03d}",
             resultado,

@@ -1,6 +1,6 @@
 # PROGRESSO — SafeTech Entry
 
-Última atualização: 25/11/2026. Tudo commitado (o último commit traz a seção 2.19).
+Última atualização: 25/11/2026. Tudo commitado (o último commit traz as seções 2.20 a 2.22: blocos 2, 4 e 5 da revisão).
 
 Este arquivo descreve **onde o trabalho parou**. Para entender o projeto em si (instalação, uso, arquitetura completa), leia o `README.md`. Para regras permanentes de trabalho no projeto, leia o `CLAUDE.md`.
 
@@ -154,6 +154,31 @@ Arquivos: `safetech/config.py`, `safetech/nucleo/{detector.py, detector_rosto.py
 - **Repetições**: título da faixa só em `modos.titulo_da_situacao` (chaves novas `faixa_analisando`/`faixa_sem_pessoas` em `TEXTOS_POR_MODO`), usado pela tela e pelo painel web. Erro de digitação no `app.py` corrigido. `logs/` no `.gitignore`.
 - Testes: 209 (novo `test_robustez.py`). Tela conferida por captura (igual à de antes). Ficou para depois: juntar os `registrar(...)` repetidos nos testes num ajudante em `falsos.py`.
 
+### 2.20 Bloco 2 da revisão: robustez (25/11)
+- **Horário com fuso (ISO 8601)**: `nucleo/horario.py`; a auditoria grava `2026-11-25T09:18:51-03:00` (também `excluido_em`). Tela, filtro de período, busca, ordenação, relatório ("25/11/2026 09:18:51 (UTC-03:00)"), painel web (campos `horario` e `fuso`), carimbos das fotos e planilha (nova coluna **Fuso (UTC)** no fim) usam as funções de `horario`, que aceitam o formato antigo. Logs antigos não são convertidos.
+- **Limite de logins errados no painel web**: `acesso_web.LimiteDeTentativas` (5 erros em 5 min bloqueiam o endereço por 5 min; `PAINEL_WEB_TENTATIVAS_MAXIMAS`, `..._JANELA_TENTATIVAS_SEG`, `..._BLOQUEIO_SEG`); resposta 429 com `Retry-After`; pedido sem login não conta; erros e bloqueios vão para o log.
+- **Selo "Sobrecarga"**: uma área está lenta quando faz menos análises/s que o menor entre metade do possível (fps da câmera, até `TAXA_MAXIMA_ANALISE_HZ`) e `SOBRECARGA_MINIMO_ANALISES`, por `TEMPO_SOBRECARGA_SEG`. Selo amarelo no cabeçalho, clique abre Configurações > Análise; início e fim no log.
+- O registro em arquivo e o reinício automático da análise (também do bloco de robustez) já tinham entrado na 2.19.
+- Testes: 231 (novo `test_fuso_login_sobrecarga.py`). Conferido por captura de tela (selo de sobrecarga). Falta medir na máquina real se os limites da sobrecarga não disparam à toa no modo vigilância.
+
+### 2.21 Bloco 4 da revisão: funções novas (25/11)
+- **Telão** (`janela_telao.py`, `controlador_telao.py`, ícones hoje em `nucleo/icones.py`): botão "Telão"/F2; tela inteira na cor do resultado, título gigante, frase do modo (`TEXTOS_POR_MODO["telao_*"]`), ícones dos EPIs que faltam (ou dos exigidos, no liberado), vídeo no canto (`TELAO_MOSTRAR_VIDEO`), F11/Esc. Segue a área da catraca (ou a aberta).
+- **Indicadores e PDF** (`servicos/indicadores.py`, `graficos.py`, `relatorio_pdf.py`, `janela_indicadores.py`, `controlador_indicadores.py`): botão "Indicadores" na auditoria; período e área; 4 números e 4 gráficos (Pillow, os mesmos na janela e no PDF); "Salvar PDF" (A4, resumo + lista de irregulares); relatório diário automático do dia anterior em `auditoria/relatorios/diarios/` (`RELATORIO_DIARIO_AUTOMATICO`). Sem biblioteca nova.
+- **Modo calibração**: botão "Calibrar" na página da câmera; `anotacao.desenhar_confiancas` (barra por EPI com risco do limiar; verde/vermelho/cinza); controle de confiança logo abaixo do vídeo, sincronizado com Configurações > Análise e entre as áreas.
+- **Backup e restauração** (`servicos/backup.py`) e **assistente** (`assistente.py`, 5 passos, abre na primeira execução, `ASSISTENTE_NA_PRIMEIRA_EXECUCAO`) na nova aba **Configurações > Sistema** (`controlador_sistema.py`), com "Abrir pasta de logs". Restaurar guarda as preferências de antes e fecha o programa sem regravar por cima (`ControladorAreas.nao_salvar_mais`).
+- **Instalador** (`instalador/`): `criar_atalho.py` (atalho com ícone e pythonw; **não foi rodado**: o usuário roda), `safetech.spec` + `gerar_exe.ps1` (PyInstaller 6.11.1, pasta onedir; **não foi gerado**: leva minutos e ~1 GB).
+- **Não feito: detector de EPI estilo YOLO** (veja a seção 4).
+- Testes: 257 (novo `test_funcoes_novas.py`). Conferido por captura de tela (telão negado/liberado, calibração, assistente, indicadores, PDF).
+
+### 2.22 Bloco 5 da revisão: design de UI/UX (25/11)
+- **Caixas com o tema** (`interface/dialogos.py`): `confirmar` (ação perigosa em vermelho, foco no Cancelar), `informar`, `pedir_intervalo`. Trocaram todos os `messagebox` (zerar, excluir, remover área/câmera, restaurar backup).
+- **Avisos em cartões** (`componentes.Avisos`): canto de baixo, cor por tipo, até 4, somem sozinhos; `avisar(texto, segundos, tipo)`; o último fica no rodapé com a hora. **Dicas** (`componentes.Dica`) nos botões. **F1** abre a lista de atalhos (`componentes.PainelAtalhos`, `janela_principal.ATALHOS`); Esc fecha.
+- **Evento selecionado**: foto à esquerda (até `FRACAO_LARGURA_FOTO` do painel) e, à direita, uma barra por EPI com ícone (`epis.ler_confiancas`, `chave_do_epi`).
+- **Tabela**: **Colunas** (menu, salvo em `preferencias.json`), **Mostrar mais 500**, período **Escolher datas...** (`horario.ler_data_digitada`); cabeçalho enxuto (Indicadores, Exportar, **Mais ▾** com pasta e zerar); busca numa linha própria; o divisor começa em `FRACAO_LARGURA_MONITORAMENTO`.
+- **Ícones dos EPIs** (`nucleo/icones.py`, antes `interface/icones_epi.py`) nos chips de EPIs exigidos, no evento selecionado, no telão e no relatório HTML (PNG embutido). Botão "Capturar foto" virou "Foto".
+- **Painel web**: tela de entrada própria (sem a caixa do navegador) e botão Sair, mantendo **só GET** (login no cabeçalho de cada leitura, `X-SafeTech-Painel`); filtros de **área** e **de/até** feitos no servidor (`/api/historico?area=&de=&ate=`); manifesto e ícones (`/manifest.webmanifest`, `/icone-192.png`...) para "Adicionar à tela inicial". Instalar como app completo exige HTTPS (não feito).
+- Testes: 279 (novo `test_interface_ux.py`; `test_painel_web.py` com login da página, ícones e filtros). Conferido por captura de tela (auditoria com cartões e barras, caixa de confirmação, login do painel web).
+
 ---
 
 ## 3. O que está pela metade
@@ -168,6 +193,11 @@ Nenhuma alteração de código ficou incompleta: tudo foi commitado. Estão pela
 ---
 
 ## 4. Próximos passos (em ordem)
+
+0. **Detector de EPI estilo YOLO** (item do bloco 4 que ficou de fora, por precisar de dados e de um treino longo). Caminho:
+   - anotar caixas de cada EPI (capacete, óculos, colete, luvas, e também "sem capacete" etc.) em algumas centenas de imagens, com uma ferramenta como o CVAT ou o Label Studio, no formato YOLO;
+   - treinar um detector pequeno (ex.: YOLO "nano"), exportar para ONNX e rodar pelo `cv2.dnn`, como já é feito com o YOLOX (sem depender de bibliotecas novas no programa). Atenção à licença: a biblioteca Ultralytics é AGPL;
+   - no programa: um novo "classificador" que, para cada pessoa, diz quais EPIs foram ACHADOS dentro da caixa dela, devolvendo o mesmo vetor de probabilidades de hoje (a decisão, o setor e a auditoria não mudam).
 
 1. **Corrigir os dois trechos desatualizados do README** (item 3.1).
 2. **Publicar no GitHub.** O usuário roda, no terminal do VS Code:

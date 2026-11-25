@@ -63,6 +63,38 @@ def nome_do_epi(chave) -> str:
     return config.EPIS.get(chave, chave)
 
 
+def chave_do_epi(nome):
+    """O contrário de nome_do_epi: "Óculos" -> "oculos" (None se não for um EPI conhecido)."""
+
+    for chave, nome_conhecido in config.EPIS.items():
+
+        if nome_conhecido.lower() == str(nome).strip().lower():
+            return chave
+
+    return None
+
+
+def ler_confiancas(texto):
+    """
+    "Capacete 97%, Luvas 12%" (como fica no log) -> [("Capacete", 0.97), ("Luvas", 0.12)].
+
+    Partes estranhas (sem número no fim) são ignoradas.
+    """
+
+    resultado = []
+
+    for parte in str(texto).split(","):
+
+        nome, _, valor = parte.strip().rpartition(" ")
+
+        try:
+            resultado.append((nome, float(valor.rstrip("%")) / 100))
+        except ValueError:
+            continue
+
+    return resultado
+
+
 def nomes_dos_epis(chaves) -> str:
     """Vários nomes em um texto só (ex.: "Capacete, Luvas")."""
 

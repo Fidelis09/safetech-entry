@@ -15,10 +15,11 @@ confirmação, mexe nos arquivos e avisa o resultado é este controlador:
 import logging
 import webbrowser
 from datetime import datetime
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 from safetech import config
-from safetech.nucleo import modos
+from safetech.interface import dialogos
+from safetech.nucleo import horario, modos
 from safetech.servicos import auditoria as modulo_auditoria
 from safetech.servicos import relatorio
 
@@ -116,7 +117,7 @@ class ControladorAuditoria:
             self._janela.avisar(f"Não foi possível salvar o relatório: {erro}", segundos=10)
             return
 
-        self._janela.avisar(f"Relatório salvo em auditoria/relatorios/{pasta.name}.", segundos=8)
+        self._janela.avisar(f"Relatório salvo em auditoria/relatorios/{pasta.name}.", segundos=8, tipo="sucesso")
 
         webbrowser.open((pasta / "relatorio.html").as_uri())
 
@@ -161,7 +162,7 @@ class ControladorAuditoria:
 
         quantidade = "1 evento exportado" if len(registros) == 1 else f"{len(registros)} eventos exportados"
 
-        self._janela.avisar(f"{quantidade} para {caminho}.", segundos=8)
+        self._janela.avisar(f"{quantidade} para {caminho}.", segundos=8, tipo="sucesso")
 
     # ============================================================
     # ZERAR (arquiva, não apaga)
@@ -173,16 +174,16 @@ class ControladorAuditoria:
         a contagem. Pede confirmação, porque é um registro de auditoria.
         """
 
-        confirmou = messagebox.askyesno(
+        confirmou = dialogos.confirmar(
+            self._janela.raiz,
             "Zerar a auditoria",
             "Zerar o log de auditoria e as fotos de evidência?\n\n"
             "A tela volta ao zero e as pessoas nas câmeras passam a contar "
             "como novas.\n\n"
             "Nada é apagado: os dados atuais vão para a pasta "
             "'auditoria/arquivados'.",
-            icon="warning",
-            default="no",
-            parent=self._janela.raiz,
+            texto_confirmar="Zerar auditoria",
+            perigoso=True,
         )
 
         if not confirmou:
@@ -224,6 +225,7 @@ class ControladorAuditoria:
             f"Auditoria zerada: {eventos} evento(s) e {fotos} foto(s) "
             f"arquivados em auditoria/arquivados/{destino.name}.",
             segundos=8,
+            tipo="sucesso",
         )
 
     # ============================================================
@@ -240,16 +242,16 @@ class ControladorAuditoria:
 
         resultado = modos.resultado(registro.modo, registro.liberado == "SIM").lower()
 
-        confirmou = messagebox.askyesno(
+        confirmou = dialogos.confirmar(
+            self._janela.raiz,
             "Excluir evento",
             f"Excluir o evento de {registro.pessoa} ({resultado}, área {registro.area}) "
-            f"de {registro.timestamp}?\n\n"
+            f"de {horario.para_exibir(registro.timestamp)}?\n\n"
             "Ele sai da tabela, do log e do painel web.\n\n"
             "Nada é apagado: a linha e a foto vão para a pasta "
             "'auditoria/excluidos'.",
-            icon="warning",
-            default="no",
-            parent=self._janela.raiz,
+            texto_confirmar="Excluir evento",
+            perigoso=True,
         )
 
         if not confirmou:
@@ -272,7 +274,7 @@ class ControladorAuditoria:
 
             log.info("Evento excluído (guardado em auditoria/excluidos): %s %s %s", registro.timestamp, registro.pessoa, registro.area)
 
-            self._janela.avisar(f"Evento de {registro.pessoa} excluído e guardado em auditoria/excluidos.")
+            self._janela.avisar(f"Evento de {registro.pessoa} excluído e guardado em auditoria/excluidos.", tipo="sucesso")
 
         else:
             self._janela.avisar("Esse evento não estava mais no log.")

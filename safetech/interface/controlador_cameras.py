@@ -14,8 +14,8 @@ sempre usam o NOME da câmera, nunca o endereço.
 """
 
 import logging
-from tkinter import messagebox
 
+from safetech.interface import dialogos
 from safetech.interface.dialogo_camera_ip import pedir_camera_ip
 from safetech.servicos import capturas, preferencias
 from safetech.servicos.camera import EstadoCamera
@@ -128,7 +128,7 @@ class ControladorCameras:
 
     def capturar_foto(self, area):
         """
-        Botão "Capturar foto": guarda a imagem do momento da área, com as
+        Botão "Foto": guarda a imagem do momento da área, com as
         caixas e o carimbo, em auditoria/capturas (fora do log).
         """
 
@@ -149,7 +149,7 @@ class ControladorCameras:
 
         self.ultima_captura = caminho
 
-        self._janela.avisar(f"Foto da área \"{area.nome}\" salva em auditoria/capturas/{caminho.name}.", segundos=7)
+        self._janela.avisar(f"Foto da área \"{area.nome}\" salva em auditoria/capturas/{caminho.name}.", segundos=7, tipo="sucesso")
 
     # ============================================================
     # CÂMERAS IP: ADICIONAR E REMOVER
@@ -198,12 +198,13 @@ class ControladorCameras:
 
         nome = configuracoes.nome_camera(endereco)
 
-        confirmou = messagebox.askyesno(
+        confirmou = dialogos.confirmar(
+            configuracoes.pai_para_dialogos(self._janela.raiz),
             "Remover câmera IP",
             f"Remover {nome} da lista de câmeras?\n\n"
             "As áreas que usavam essa câmera voltam a usar a webcam.",
-            default="no",
-            parent=configuracoes.pai_para_dialogos(self._janela.raiz),
+            texto_confirmar="Remover câmera",
+            perigoso=True,
         )
 
         if not confirmou:

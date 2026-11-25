@@ -357,6 +357,41 @@ def _area_valida(item, enderecos_ip, nomes_usados):
 # TEMA DA TELA (escuro ou claro)
 # ============================================================
 
+def carregar_colunas_auditoria(arquivo=config.ARQUIVO_PREFERENCIAS):
+    """Colunas escolhidas para a tabela da auditoria (None = todas)."""
+
+    colunas = _ler_dados(arquivo).get("colunas_auditoria")
+
+    if isinstance(colunas, list) and all(isinstance(campo, str) for campo in colunas):
+        return colunas
+
+    return None
+
+
+def salvar_colunas_auditoria(colunas, arquivo=config.ARQUIVO_PREFERENCIAS):
+
+    dados = _ler_dados(arquivo)
+
+    dados["colunas_auditoria"] = list(colunas)
+
+    _gravar_dados(dados, arquivo)
+
+
+def assistente_concluido(arquivo=config.ARQUIVO_PREFERENCIAS) -> bool:
+    """O assistente de configuração já foi concluído (não precisa abrir sozinho)?"""
+
+    return bool(_ler_dados(arquivo).get("assistente_concluido"))
+
+
+def marcar_assistente_concluido(arquivo=config.ARQUIVO_PREFERENCIAS):
+
+    dados = _ler_dados(arquivo)
+
+    dados["assistente_concluido"] = True
+
+    _gravar_dados(dados, arquivo)
+
+
 def carregar_tema(arquivo=config.ARQUIVO_PREFERENCIAS):
     """Tema escolhido da última vez ("escuro" ou "claro"); o padrão se não houver."""
 

@@ -25,9 +25,16 @@ import tkinter as tk
 from tkinter import ttk
 
 from safetech import config
+from safetech.interface.componentes import dica
 from safetech.interface.tema import CORES, FONTES
 from safetech.nucleo.epis import nome_do_epi
+from safetech.nucleo.icones import desenhar_icone_epi
 
+from PIL import ImageTk
+
+
+# Tamanho (px) do ícone dentro de cada botão de EPI exigido
+TAMANHO_ICONE_CHIP = 16
 
 # Distância (px) entre as legendas sobre o vídeo e a borda dele
 MARGEM_LEGENDA = 10
@@ -69,6 +76,9 @@ class PainelMonitoramento(ttk.Frame):
         ao_alternar_camera,
         ao_capturar_foto=None,
         ao_trocar_camera=None,
+        ao_alternar_calibracao=None,
+        ao_mudar_limiar=None,
+        limiar_inicial=config.LIMIAR_CONFIANCA_PADRAO,
     ):
         """
         epis_do_modelo        -> EPIs que o modelo reconhece: só eles podem
@@ -80,8 +90,11 @@ class PainelMonitoramento(ttk.Frame):
         ao_mudar_fiscalizacao -> chamado com (setor, exigidos) ao marcar
                                  ou desmarcar um EPI à mão.
         ao_alternar_camera    -> liga ou desliga a câmera da área.
-        ao_capturar_foto      -> botão "Capturar foto" (sem argumentos).
+        ao_capturar_foto      -> botão "Foto" (sem argumentos).
         ao_trocar_camera      -> botão "Trocar câmera" (abre as Configurações).
+        ao_alternar_calibracao-> botão "Calibrar": chamado com True/False.
+        ao_mudar_limiar       -> controle de confiança do modo calibração:
+                                 chamado com o valor (0 a 1).
         """
 
         super().__init__(pai, style="Painel.TFrame", padding=(0, 8, 0, 0))
@@ -93,6 +106,12 @@ class PainelMonitoramento(ttk.Frame):
         self._ao_escolher_setor = ao_escolher_setor
         self._ao_mudar_fiscalizacao = ao_mudar_fiscalizacao
         self._ao_alternar_camera = ao_alternar_camera
+        self._ao_alternar_calibracao = ao_alternar_calibracao or (lambda _ligado: None)
+        self._ao_mudar_limiar = ao_mudar_limiar or (lambda _valor: None)
+
+        # Modo calibração: barras de confiança no vídeo e o controle do limiar
+        self._calibrando = tk.BooleanVar(value=False)
+        self._limiar_calibracao = tk.DoubleVar(value=limiar_inicial * 100)
 
         # Fiscalização da área: modo, setor e um "chip" por EPI
         self._modo = tk.StringVar(value=modo_inicial)
@@ -105,6 +124,9 @@ class PainelMonitoramento(ttk.Frame):
 
         self._chips = {}
 
+        # Ícones dos chips: um por EPI e por estado (normal, marcado, desativado)
+        self._icones_chips = {}
+
         # Referência à imagem em exibição (sem ela o Tkinter apaga a imagem)
         self._imagem_video = None
 
@@ -115,6 +137,7 @@ class PainelMonitoramento(ttk.Frame):
 
         self._montar_cabecalho(ao_capturar_foto, ao_trocar_camera)
         self._montar_video()
+        self._montar_calibracao()
         self._montar_status()
         self._montar_controles()
 
@@ -140,10 +163,12 @@ class PainelMonitoramento(ttk.Frame):
         )
         self._botao_camera.pack(side="right")
 
+        dica(self._botao_camera, "Liga ou desliga a câmera desta área (tecla Espaço)")
+
         # Guarda o momento (imagem com caixas e carimbo) fora do log
         self._botao_foto = ttk.Button(
             cabeca,
-            text="Capturar foto",
+            text="Foto",
             style="Secundario.TButton",
             command=ao_capturar_foto or (lambda: None),
             takefocus=False,
@@ -151,13 +176,31 @@ class PainelMonitoramento(ttk.Frame):
         )
         self._botao_foto.pack(side="right", padx=(0, 8))
 
-        ttk.Button(
+        dica(self._botao_foto, "Guarda a imagem de agora, com as caixas e a data, em auditoria/capturas (fora do log)")
+
+        # Liga e desliga as barras de confiança sobre as pessoas
+        botao_calibrar = ttk.Checkbutton(
+            cabeca,
+            text="Calibrar",
+            variable=self._calibrando,
+            style="Alternar.Toolbutton",
+            command=self._ao_clicar_calibrar,
+            takefocus=False,
+        )
+        botao_calibrar.pack(side="right", padx=(0, 8))
+
+        dica(botao_calibrar, "Mostra a confiança de cada EPI sobre as pessoas, para ajustar a confiança mínima vendo o efeito")
+
+        botao_trocar = ttk.Button(
             cabeca,
             text="Trocar câmera",
             style="Secundario.TButton",
             command=ao_trocar_camera or (lambda: None),
             takefocus=False,
-        ).pack(side="right", padx=(0, 8))
+        )
+        botao_trocar.pack(side="right", padx=(0, 8))
+
+        dica(botao_trocar, "Escolhe outra webcam ou uma câmera IP para esta área")
 
         # À esquerda: qual câmera esta área usa (webcam N ou o nome da
         # câmera IP; nunca o endereço, que pode ter a senha). Quem comanda
@@ -165,8 +208,10 @@ class PainelMonitoramento(ttk.Frame):
         self._rotulo_camera = ttk.Label(cabeca, text="", style="Painel.TLabel", font=FONTES["texto_negrito"])
         self._rotulo_camera.pack(side="left")
 
+        # Guardado, mas não mostrado aqui: o cabeçalho divide a linha com
+        # quatro botões, e quem comanda a catraca já aparece na barra de
+        # áreas ("· catraca")
         self._rotulo_catraca = ttk.Label(cabeca, text="", style="Suave.Painel.TLabel")
-        self._rotulo_catraca.pack(side="left", padx=(8, 0))
 
     def _montar_video(self):
 
@@ -243,10 +288,45 @@ class PainelMonitoramento(ttk.Frame):
         # Mantém tudo no lugar quando o painel muda de tamanho
         self._tela.bind("<Configure>", self._ao_redimensionar_tela)
 
+    def _montar_calibracao(self):
+        """
+        Linha que só aparece no modo calibração, logo abaixo do vídeo:
+        o controle da confiança mínima, para ver o efeito nas barras na hora.
+        """
+
+        self._linha_calibracao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 8))
+
+        self._linha_calibracao.columnconfigure(1, weight=1)
+
+        ttk.Label(self._linha_calibracao, text="Confiança mínima", style="Cartao.TLabel", font=FONTES["texto_negrito"]).grid(
+            row=0, column=0, sticky="w", padx=(0, 12)
+        )
+
+        ttk.Scale(
+            self._linha_calibracao,
+            from_=config.LIMIAR_CONFIANCA_MINIMO * 100,
+            to=config.LIMIAR_CONFIANCA_MAXIMO * 100,
+            orient="horizontal",
+            variable=self._limiar_calibracao,
+            command=self._ao_mover_limiar,
+            takefocus=False,
+        ).grid(row=0, column=1, sticky="ew")
+
+        self._rotulo_limiar = ttk.Label(self._linha_calibracao, text="", style="Cartao.TLabel", font=FONTES["texto_negrito"], width=5)
+        self._rotulo_limiar.grid(row=0, column=2, sticky="e", padx=(12, 0))
+
+        ttk.Label(
+            self._linha_calibracao,
+            text="Verde: passou do limiar (risco branco) · Vermelha: não passou · Cinza: não exigido",
+            style="Suave.Cartao.TLabel",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+        self._atualizar_rotulo_limiar()
+
     def _montar_status(self):
 
         self._faixa_status = tk.Frame(self, bg=CORES["cartao"])
-        self._faixa_status.grid(row=2, column=0, sticky="ew", pady=(8, 8))
+        self._faixa_status.grid(row=3, column=0, sticky="ew", pady=(8, 8))
 
         self._faixa_status.columnconfigure(2, weight=1)
 
@@ -300,7 +380,7 @@ class PainelMonitoramento(ttk.Frame):
     def _montar_controles(self):
 
         cartao = ttk.Frame(self, style="Cartao.TFrame", padding=(14, 10))
-        cartao.grid(row=3, column=0, sticky="ew")
+        cartao.grid(row=4, column=0, sticky="ew")
 
         cartao.columnconfigure(1, weight=1)
 
@@ -376,6 +456,7 @@ class PainelMonitoramento(ttk.Frame):
             if chave not in self._epis_do_modelo:
                 chip.state(["disabled"])
 
+        self.atualizar_icones()
         self._atualizar_chips()
 
         # Modelo antigo: não distingue os EPIs, então não há o que escolher
@@ -468,17 +549,71 @@ class PainelMonitoramento(ttk.Frame):
             x1, y1, x2, y2 = caixa
             self._tela.coords(fundo, x1 - folga_esquerda, y1 - 5, x2 + 10, y2 + 5)
 
+    def _ao_clicar_calibrar(self):
+
+        ligado = self._calibrando.get()
+
+        # A linha do controle aparece entre o vídeo e a faixa de status
+        if ligado:
+            self._linha_calibracao.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        else:
+            self._linha_calibracao.grid_remove()
+
+        self._ao_alternar_calibracao(ligado)
+
+    def _ao_mover_limiar(self, _valor=None):
+
+        self._atualizar_rotulo_limiar()
+
+        self._ao_mudar_limiar(self._limiar_calibracao.get() / 100)
+
+    def _atualizar_rotulo_limiar(self):
+
+        self._rotulo_limiar.config(text=f"{self._limiar_calibracao.get():.0f}%")
+
+    def definir_limiar(self, valor):
+        """Mostra a confiança mínima (0 a 1) mudada em outro lugar. Não avisa ninguém."""
+
+        self._limiar_calibracao.set(valor * 100)
+        self._atualizar_rotulo_limiar()
+
+    @property
+    def calibrando(self) -> bool:
+        return self._calibrando.get()
+
     def _exigidos(self):
         """Chaves dos EPIs marcados como obrigatórios, na ordem de config.EPIS."""
 
         return tuple(chave for chave in config.EPIS if self._exigir[chave].get())
+
+    def atualizar_icones(self):
+        """
+        Põe o desenho do EPI em cada chip, na cor do texto de cada estado
+        (apagado, marcado em azul, desativado). Chamado de novo depois de
+        trocar o tema: os ícones são imagens, não acompanham sozinhos.
+        """
+
+        for chave, chip in self._chips.items():
+
+            imagens = {
+                estado: ImageTk.PhotoImage(desenhar_icone_epi(chave, TAMANHO_ICONE_CHIP, cor))
+                for estado, cor in (("normal", CORES["texto_suave"]), ("marcado", "white"), ("desativado", CORES["borda"]))
+            }
+
+            self._icones_chips[chave] = imagens
+
+            chip.configure(
+                image=(imagens["normal"], "disabled", imagens["desativado"], "selected", imagens["marcado"]),
+                compound="left",
+            )
 
     def _atualizar_chips(self):
         """Chip ligado ganha um "✓" antes do nome: não depende só da cor."""
 
         for chave, chip in self._chips.items():
 
-            marca = "✓  " if self._exigir[chave].get() else ""
+            # Espaço entre o ícone e o nome; o "✓" repete o "marcado" sem depender da cor
+            marca = "  ✓ " if self._exigir[chave].get() else "  "
 
             chip.config(text=marca + nome_do_epi(chave))
 
@@ -525,12 +660,18 @@ class PainelMonitoramento(ttk.Frame):
 
         self._atualizar_chips()
 
+    def definir_modo(self, modo):
+        """Marca o modo (catraca ou vigilância) mudado em outro lugar. Não avisa ninguém."""
+
+        self._modo.set(modo)
+
     def definir_camera(self, nome_camera, comanda_catraca):
         """Nome da câmera da área e a etiqueta "comanda a catraca"."""
 
         self._rotulo_camera.config(text=nome_camera)
 
-        self._rotulo_catraca.config(text="comanda a catraca" if comanda_catraca else "")
+        # Curto: o cabeçalho divide a linha com quatro botões
+        self._rotulo_catraca.config(text="· catraca" if comanda_catraca else "")
 
     def tamanho_do_video(self):
         """(largura, altura) em pixels do espaço disponível para o vídeo."""
@@ -652,7 +793,7 @@ class PainelMonitoramento(ttk.Frame):
         return self._rotulo_status.cget("text"), self._rotulo_detalhe.cget("text")
 
     def definir_botao_camera(self, texto, estilo, habilitado=True):
-        """Botão principal da câmera; "Capturar foto" só funciona com vídeo."""
+        """Botão principal da câmera; "Foto" só funciona com vídeo."""
 
         self._botao_camera.config(
             text=texto,

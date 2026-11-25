@@ -146,7 +146,7 @@ class ControladorPainelWeb:
             self._janela.avisar("Painel web desligado.")
             return True, "Painel web desligado."
 
-        self._janela.avisar(f"Painel web no ar em {self.endereco}.")
+        self._janela.avisar(f"Painel web no ar em {self.endereco}.", tipo="sucesso")
 
         return True, f"Painel no ar em {self.endereco}."
 

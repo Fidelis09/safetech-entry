@@ -10,6 +10,8 @@ não precisa ficar o tempo todo na tela principal:
     Painel web     -> ligar, porta, acesso pela rede, usuário e senha do
                       painel do gerente
     Coleta         -> salvar imagens rotuladas para treinar o modelo
+    Sistema        -> assistente de configuração, backup e restauração
+                      das configurações, pasta de logs
 
 (Setor, modo e EPIs exigidos ficam na própria aba de cada área, na tela
 principal: é o que se mexe durante a operação.)
@@ -55,6 +57,10 @@ class JanelaConfiguracoes(tk.Toplevel):
         ao_enviar_arquivos,
         ao_aplicar_painel_web=None,
         ao_abrir_painel_web=None,
+        ao_assistente=None,
+        ao_salvar_backup=None,
+        ao_restaurar_backup=None,
+        ao_abrir_logs=None,
         escala=1.0,
     ):
         """
@@ -127,6 +133,14 @@ class JanelaConfiguracoes(tk.Toplevel):
         self._ao_aplicar_painel_web = ao_aplicar_painel_web or (lambda **_campos: (False, ""))
         self._ao_abrir_painel_web = ao_abrir_painel_web or (lambda: None)
 
+        # ---------------- sistema ----------------
+        self._acoes_sistema = {
+            "assistente": ao_assistente,
+            "salvar_backup": ao_salvar_backup,
+            "restaurar_backup": ao_restaurar_backup,
+            "abrir_logs": ao_abrir_logs,
+        }
+
         self._web_ativo = tk.BooleanVar(value=False)
         self._web_na_rede = tk.BooleanVar(value=False)
         self._web_porta = tk.StringVar()
@@ -143,7 +157,7 @@ class JanelaConfiguracoes(tk.Toplevel):
     # ============================================================
 
     def mostrar(self, aba=None):
-        """Mostra a janela na frente (opcionalmente já numa aba: "area", "analise", "painel", "coleta")."""
+        """Mostra a janela na frente (opcionalmente já numa aba: "area", "analise", "painel", "coleta", "sistema")."""
 
         if aba in self._abas:
             self._caderno.select(self._abas[aba])
@@ -191,12 +205,14 @@ class JanelaConfiguracoes(tk.Toplevel):
             "analise": self._montar_aba_analise(),
             "painel": self._montar_aba_painel_web(),
             "coleta": self._montar_aba_coleta(),
+            "sistema": self._montar_aba_sistema(),
         }
 
         self._caderno.add(self._abas["area"], text="Área e câmera")
         self._caderno.add(self._abas["analise"], text="Análise")
         self._caderno.add(self._abas["painel"], text="Painel web")
         self._caderno.add(self._abas["coleta"], text="Coleta de imagens")
+        self._caderno.add(self._abas["sistema"], text="Sistema")
 
         rodape = ttk.Frame(corpo, style="Painel.TFrame")
         rodape.grid(row=2, column=0, sticky="ew", pady=(12, 0))
@@ -648,6 +664,67 @@ class JanelaConfiguracoes(tk.Toplevel):
     # ABA: COLETA DE IMAGENS
     # ------------------------------------------------------
 
+    def _montar_aba_sistema(self):
+        """Assistente, backup e restauração das configurações, e a pasta de logs."""
+
+        aba = self._nova_aba()
+
+        def acao(nome):
+            return lambda: (self._acoes_sistema[nome] or (lambda: None))()
+
+        # ---------------- assistente ----------------
+
+        self._titulo(aba, "Assistente de configuração", 0)
+        self._explicacao(
+            aba,
+            "Passo a passo para deixar o programa pronto: câmera, setor e modo da área "
+            "principal e a senha do painel web. Ele abre sozinho na primeira vez.",
+            1,
+            espaco_depois=8,
+        )
+
+        ttk.Button(aba, text="Abrir o assistente...", style="Secundario.TButton", command=acao("assistente"), takefocus=False).grid(
+            row=2, column=0, sticky="w", pady=(0, 18)
+        )
+
+        # ---------------- backup ----------------
+
+        self._titulo(aba, "Backup das configurações", 3)
+        self._explicacao(
+            aba,
+            "Um arquivo só com as áreas, câmeras, ajustes da análise, tema e painel web, para "
+            "levar a outro computador ou guardar antes de grandes mudanças. Não leva a auditoria "
+            "nem o dataset. Atenção: o endereço de uma câmera IP pode conter a senha dela.",
+            4,
+            espaco_depois=8,
+        )
+
+        botoes = ttk.Frame(aba, style="Cartao.TFrame")
+        botoes.grid(row=5, column=0, sticky="w", pady=(0, 18))
+
+        ttk.Button(botoes, text="Salvar backup...", style="Secundario.TButton", command=acao("salvar_backup"), takefocus=False).pack(side="left")
+
+        ttk.Button(
+            botoes, text="Restaurar backup...", style="Secundario.TButton", command=acao("restaurar_backup"), takefocus=False
+        ).pack(side="left", padx=(10, 0))
+
+        # ---------------- logs ----------------
+
+        self._titulo(aba, "Registro de erros", 6)
+        self._explicacao(
+            aba,
+            f"Tudo o que deu errado (e as ações importantes) fica em logs/{config.NOME_ARQUIVO_LOG}, "
+            "com data, hora e de qual parte do programa veio.",
+            7,
+            espaco_depois=8,
+        )
+
+        ttk.Button(aba, text="Abrir pasta de logs", style="Secundario.TButton", command=acao("abrir_logs"), takefocus=False).grid(
+            row=8, column=0, sticky="w"
+        )
+
+        return aba
+
     def _montar_aba_coleta(self):
 
         aba = self._nova_aba()
@@ -737,6 +814,13 @@ class JanelaConfiguracoes(tk.Toplevel):
 
         self._rotulo_limiar.config(text=f"{self._limiar.get():.0f}%")
         self._rotulo_intervalo.config(text=f"{self._intervalo.get():.1f} s")
+
+    def definir_limiar(self, valor):
+        """Mostra a confiança mínima (0 a 1) mudada em outro lugar (ex.: modo calibração)."""
+
+        if abs(self._limiar.get() - valor * 100) > 0.01:
+            self._limiar.set(valor * 100)
+            self._atualizar_rotulos_parametros()
 
     def _restaurar_padroes(self):
 

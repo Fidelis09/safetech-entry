@@ -612,30 +612,11 @@ def aplicar_tema(janela, escala=1.0):
 # ============================================================
 
 def desenhar_icone(tamanho=64):
-    """Devolve o ícone do SafeTech como imagem PIL (RGBA), quadrada."""
+    """O escudo do SafeTech (imagem PIL RGBA) nas cores de destaque do tema."""
 
-    grande = tamanho * 4
-    imagem = Image.new("RGBA", (grande, grande), (0, 0, 0, 0))
-    pincel = ImageDraw.Draw(imagem)
+    from safetech.nucleo.icones import desenhar_escudo
 
-    # Medidas relativas ao tamanho: o desenho é o mesmo em qualquer escala
-    def p(x, y):
-        return (x * grande, y * grande)
-
-    escudo = [
-        p(0.50, 0.04), p(0.88, 0.17), p(0.88, 0.48),
-        p(0.80, 0.70), p(0.50, 0.96), p(0.20, 0.70),
-        p(0.12, 0.48), p(0.12, 0.17),
-    ]
-
-    pincel.polygon(escudo, fill=CORES["destaque"])
-
-    # Faixa mais escura na metade direita: dá volume ao escudo
-    pincel.polygon([p(0.50, 0.04), p(0.88, 0.17), p(0.88, 0.48), p(0.80, 0.70), p(0.50, 0.96)], fill=CORES["destaque_hover"])
-
-    pincel.line([p(0.31, 0.50), p(0.45, 0.64), p(0.71, 0.36)], fill="white", width=int(grande * 0.09), joint="curve")
-
-    return imagem.resize((tamanho, tamanho), Image.LANCZOS)
+    return desenhar_escudo(tamanho, CORES["destaque"], CORES["destaque_hover"])
 
 
 # ============================================================

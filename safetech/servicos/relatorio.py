@@ -19,12 +19,16 @@ ser copiada ou enviada (compactada) e continua abrindo. A foto é
 COPIADA, não movida: o log de auditoria continua intacto.
 """
 
+import base64
 import html
+import io
 import shutil
 from datetime import datetime
 
 from safetech import config
-from safetech.nucleo import modos
+from safetech.nucleo import horario, modos
+from safetech.nucleo.epis import chave_do_epi
+from safetech.nucleo.icones import desenhar_icone_epi
 
 
 NOME_EVENTO = {
@@ -78,7 +82,7 @@ def _pasta_nova(pasta_relatorios, registro):
     Se já existir (relatório salvo duas vezes), ganha um número.
     """
 
-    momento = datetime.strptime(registro.timestamp, "%Y-%m-%d %H:%M:%S")
+    momento = horario.ler(registro.timestamp) or datetime.now()
 
     base = f"{momento.strftime('%Y-%m-%d_%H-%M-%S')}_{registro.pessoa}"
 
@@ -161,9 +165,37 @@ def _lista_confiancas(registro) -> str:
 
         marca = ' <span class="exigido">(exigido)</span>' if nome in exigidos else ""
 
-        itens.append(f"<div>{e(parte)}{marca}</div>")
+        # O desenho do EPI ao lado (embutido no HTML: o relatório continua
+        # sendo um arquivo só, que pode ser enviado sem a pasta de ícones)
+        icone = _icone_embutido(chave_do_epi(nome))
+
+        itens.append(f"<div>{icone}{e(parte)}{marca}</div>")
 
     return "\n".join(itens) or "-"
+
+
+# Tamanho e cor do ícone dos EPIs no relatório
+TAMANHO_ICONE_RELATORIO = 18
+COR_ICONE_RELATORIO = "#374151"
+
+
+def _icone_embutido(chave) -> str:
+    """<img> com o ícone do EPI dentro do próprio HTML (PNG em base64); "" sem chave."""
+
+    if not chave:
+        return ""
+
+    memoria = io.BytesIO()
+
+    # Desenhado no dobro do tamanho: fica nítido em telas de alta resolução
+    desenhar_icone_epi(chave, TAMANHO_ICONE_RELATORIO * 2, COR_ICONE_RELATORIO).save(memoria, format="PNG")
+
+    dados = base64.b64encode(memoria.getvalue()).decode("ascii")
+
+    return (
+        f'<img src="data:image/png;base64,{dados}" width="{TAMANHO_ICONE_RELATORIO}" '
+        f'height="{TAMANHO_ICONE_RELATORIO}" alt="" style="vertical-align:middle;margin-right:6px">'
+    )
 
 
 def _montar_html(registro, foto, outros):
@@ -172,10 +204,11 @@ def _montar_html(registro, foto, outros):
 
     texto_resultado, classe = _resultado(registro)
 
-    momento = datetime.strptime(registro.timestamp, "%Y-%m-%d %H:%M:%S")
+    # Com o fuso (ex.: "25/11/2026 09:18:51 (UTC-03:00)"), quando o evento tem
+    quando = horario.para_relatorio(registro.timestamp)
 
     dados = [
-        ("Data e hora", momento.strftime("%d/%m/%Y %H:%M:%S")),
+        ("Data e hora", quando),
         ("Pessoa", registro.pessoa),
         ("Evento", NOME_EVENTO.get(registro.evento, registro.evento)),
         ("Setor", registro.setor or "-"),
@@ -216,7 +249,7 @@ def _montar_html(registro, foto, outros):
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Relatório SafeTech - {e(registro.pessoa)} - {e(momento.strftime("%d/%m/%Y %H:%M:%S"))}</title>
+<title>Relatório SafeTech - {e(registro.pessoa)} - {e(quando)}</title>
 <style>
   body {{ font-family: Segoe UI, Arial, sans-serif; color: #1f2937; margin: 24px; max-width: {config.LARGURA_FOTO_RELATORIO}px; }}
   h1 {{ margin: 0 0 4px; font-size: 22px; }}
@@ -259,7 +292,7 @@ def _montar_html(registro, foto, outros):
 <footer>
   "Confiança" é a certeza do modelo de que a pessoa ESTÁ usando o equipamento
   (mediana das últimas classificações). Acima da confiança mínima, o EPI conta como presente.
-  Relatório gerado em {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}.
+  Relatório gerado em {e(horario.para_relatorio(horario.agora_iso()))}.
 </footer>
 
 </body>

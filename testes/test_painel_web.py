@@ -81,7 +81,68 @@ def test_sem_login_pede_senha(painel):
     if not config.PAINEL_WEB_SENHA:
         pytest.skip("painel configurado sem senha")
 
-    assert pedir(painel, "/", login=False)[0] == 401
+    # Os dados precisam de login...
+    for rota in ("/api/historico", "/api/ao-vivo", "/api/areas", "/exportar.csv", "/ao-vivo.jpg", "/api/login"):
+        assert pedir(painel, rota, login=False)[0] == 401
+
+    # ...mas a página em si é pública: ela mostra a tela de login (sem dados)
+    assert pedir(painel, "/", login=False)[0] == 200
+
+
+def test_login_da_pagina_nao_abre_a_janela_do_navegador(painel):
+    """Pedido da página (X-SafeTech-Painel): 401 sem WWW-Authenticate. Os outros continuam com."""
+
+    if not config.PAINEL_WEB_SENHA:
+        pytest.skip("painel configurado sem senha")
+
+    def cabecalho_de_login(extras):
+
+        pedido = urllib.request.Request(painel.endereco_de_teste + "/api/historico", headers=extras)
+
+        try:
+            urllib.request.urlopen(pedido, timeout=5)
+        except urllib.error.HTTPError as erro:
+            return erro.headers.get("WWW-Authenticate")
+
+    assert cabecalho_de_login({"X-SafeTech-Painel": "1"}) is None
+    assert cabecalho_de_login({}) is not None
+
+
+def test_icones_e_manifesto_para_o_celular(painel):
+
+    codigo, corpo = pedir(painel, "/manifest.webmanifest", login=False)
+
+    assert codigo == 200
+    assert json.loads(corpo)["icons"][0]["src"] == "/icone-192.png"
+
+    codigo, corpo = pedir(painel, "/icone-192.png", login=False)
+
+    assert codigo == 200
+    assert corpo.startswith(b"\x89PNG")
+
+
+def test_historico_filtrado_por_area_e_data(auditoria):
+
+    from safetech.nucleo import horario
+
+    servidor = ServidorWeb(auditoria)
+
+    for area in ("Portaria", "Pátio", "Portaria"):
+        auditoria.registrar(
+            evento="ENTRADA", identificador_pessoa=1, setor="Canteiro", exigidos=(), itens=(),
+            faltando=(), liberado=True, area=area,
+        )
+
+    hoje = horario.agora().date().isoformat()
+
+    assert servidor.dados_historico(area="Portaria")["filtrados"] == 2
+    assert servidor.dados_historico(de=hoje, ate=hoje)["filtrados"] == 3
+    assert servidor.dados_historico(de="2000-01-01", ate="2000-01-02")["filtrados"] == 0
+
+    dados = servidor.dados_historico(area="Pátio")
+
+    assert [evento["area"] for evento in dados["eventos"]] == ["Pátio"]
+    assert dados["areas"] == ["Portaria", "Pátio"]
 
 
 def test_pagina_e_historico_com_login(painel):

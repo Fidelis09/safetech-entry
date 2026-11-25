@@ -21,6 +21,8 @@ A auditoria NÃO fica aqui: ela é uma só para todas as áreas.
 import time
 from datetime import datetime
 
+from safetech import config
+
 import cv2
 from PIL import Image, ImageTk
 
@@ -56,6 +58,12 @@ class AreaMonitorada:
         self._ultimo_estado_camera = None
         self._proxima_medicao = 0.0
 
+        # Desde quando a análise está lenta (None = está em dia)
+        self._lenta_desde = None
+
+        # Modo calibração: barras de confiança de cada EPI sobre as pessoas
+        self.calibracao = False
+
     @property
     def nome(self):
         return self.dados.nome
@@ -84,6 +92,32 @@ class AreaMonitorada:
             return frame, EstadoCena(modo=self.parametros.modo_deteccao, area=self.nome)
 
         return frame, self.analisador.estado()
+
+    def verificar_sobrecarga(self, agora):
+        """
+        Análises por segundo se a área está LENTA há TEMPO_SOBRECARGA_SEG
+        ou mais; None se está em dia (ou parada, ou com erro).
+
+        agora -> time.perf_counter() do momento
+        """
+
+        if self.analisador is None or self.analisador.erro or self.camera.estado is not EstadoCamera.ATIVA:
+            self._lenta_desde = None
+            return None
+
+        analises = self.analisador.estado().analises_por_segundo
+
+        if not analise_lenta(analises, self.camera.fps):
+            self._lenta_desde = None
+            return None
+
+        if self._lenta_desde is None:
+            self._lenta_desde = agora
+
+        if agora - self._lenta_desde >= config.TEMPO_SOBRECARGA_SEG:
+            return analises
+
+        return None
 
     def parar(self):
 
@@ -220,6 +254,9 @@ class AreaMonitorada:
 
         anotacao.desenhar_pessoas(imagem, estado.pessoas, escala, modo=estado.modo)
 
+        if self.calibracao:
+            anotacao.desenhar_confiancas(imagem, estado.pessoas, escala, self.parametros.limiar_confianca, estado.exigidos)
+
         imagem = Image.fromarray(cv2.cvtColor(imagem, cv2.COLOR_BGR2RGB))
 
         # Reaproveita o mesmo objeto de imagem enquanto o tamanho não
@@ -304,6 +341,28 @@ class AreaMonitorada:
 
         # O ponto do "AO VIVO" fica aceso nos segundos pares: pisca
         self.painel.definir_legenda(esquerda, direita, ponto_aceso=datetime.now().second % 2 == 0)
+
+
+# ============================================================
+# SOBRECARGA
+# ============================================================
+
+def analise_lenta(analises_por_segundo, fps_camera) -> bool:
+    """
+    A análise está abaixo do que deveria? (veja SOBRECARGA_* no config.py)
+
+    O esperado depende da câmera: uma câmera IP de 8 fps não permite
+    mais que 8 análises por segundo, e isso não é sobrecarga.
+    """
+
+    esperado = min(fps_camera, config.TAXA_MAXIMA_ANALISE_HZ)
+
+    if esperado <= 0:
+        return False
+
+    limite = min(esperado * config.SOBRECARGA_FRACAO_MINIMA, config.SOBRECARGA_MINIMO_ANALISES)
+
+    return analises_por_segundo < limite
 
 
 # ============================================================

@@ -201,3 +201,110 @@ def sem_acentos(texto) -> str:
     decomposto = unicodedata.normalize("NFKD", texto)
 
     return "".join(letra for letra in decomposto if not unicodedata.combining(letra))
+
+
+# ============================================================
+# MODO CALIBRAÇÃO: A CONFIANÇA DE CADA EPI SOBRE A PESSOA
+# ============================================================
+#
+# Para ajustar a "confiança mínima" vendo o efeito na hora: embaixo da
+# caixa de cada pessoa aparece uma barra por EPI, cheia até a confiança
+# do modelo, com um risco branco na altura do limiar.
+#
+#   verde  -> passou do limiar (conta como "usando")
+#   vermelho -> não passou
+#   cinza  -> EPI que o setor não exige (o modelo avalia, mas não conta)
+# ============================================================
+
+COR_BARRA_OK = (94, 197, 34)
+COR_BARRA_FALTA = (68, 68, 239)
+COR_BARRA_NAO_EXIGIDO = (150, 150, 150)
+COR_TRILHO = (40, 40, 40)
+COR_LIMIAR = (255, 255, 255)
+
+
+def sigla_do_epi(chave) -> str:
+    """ "capacete" -> "CAP", "oculos" -> "OCU" (sem acento: a fonte do OpenCV não tem)."""
+
+    from safetech.nucleo.epis import nome_do_epi
+
+    return sem_acentos(nome_do_epi(chave))[:3].upper()
+
+
+def desenhar_confiancas(imagem_bgr, pessoas, escala, limiar, exigidos):
+    """
+    Barras de confiança de cada EPI embaixo de cada pessoa (a imagem é alterada).
+
+    escala   -> fator entre a imagem e o frame original (como em desenhar_pessoas)
+    limiar   -> confiança mínima (0 a 1): onde fica o risco branco
+    exigidos -> chaves dos EPIs que o setor exige
+    """
+
+    altura_imagem, largura_imagem = imagem_bgr.shape[:2]
+
+    base = max(1, round(largura_imagem / 1000))
+    tamanho_fonte = config.ESCALA_FONTE_ROTULO * max(1.0, largura_imagem / 800) * 0.85
+
+    (_, altura_texto), _ = cv2.getTextSize("CAP 100%", FONTE, tamanho_fonte, base)
+
+    altura_linha = altura_texto + 6 * base
+    largura_sigla = cv2.getTextSize("CAP ", FONTE, tamanho_fonte, base)[0][0]
+    largura_valor = cv2.getTextSize(" 100%", FONTE, tamanho_fonte, base)[0][0]
+
+    for pessoa in pessoas:
+
+        if not pessoa.itens:
+            continue
+
+        x1, _, x2, y2 = (int(valor * escala) for valor in pessoa.caixa)
+
+        # Painel no mínimo largo o bastante para a sigla, a barra e o número
+        largura_painel = max(x2 - x1, largura_sigla + largura_valor + 40 * base)
+        altura_painel = altura_linha * len(pessoa.itens) + 4 * base
+
+        # Embaixo da caixa; sem espaço (pessoa no pé da imagem), por dentro
+        topo = y2 + 2 * base if y2 + altura_painel < altura_imagem else max(0, y2 - altura_painel)
+        esquerda = max(0, min(x1, largura_imagem - largura_painel))
+
+        # Fundo escuro meio transparente, para ler em cima de qualquer imagem
+        trecho = imagem_bgr[topo: topo + altura_painel, esquerda: esquerda + largura_painel]
+
+        if trecho.size:
+            escuro = trecho.copy()
+            escuro[:] = COR_FAIXA_CARIMBO
+            cv2.addWeighted(escuro, OPACIDADE_CARIMBO, trecho, 1 - OPACIDADE_CARIMBO, 0, dst=trecho)
+
+        inicio_barra = esquerda + 3 * base + largura_sigla
+        fim_barra = esquerda + largura_painel - largura_valor - 3 * base
+
+        for posicao, item in enumerate(pessoa.itens):
+
+            y = topo + 2 * base + posicao * altura_linha
+            meio = y + altura_linha // 2
+
+            if item.chave not in exigidos:
+                cor = COR_BARRA_NAO_EXIGIDO
+            else:
+                cor = COR_BARRA_OK if item.confianca >= limiar else COR_BARRA_FALTA
+
+            cv2.putText(imagem_bgr, sigla_do_epi(item.chave), (esquerda + 3 * base, meio + altura_texto // 2), FONTE, tamanho_fonte, COR_TEXTO, base, cv2.LINE_AA)
+
+            # Trilho, a barra até a confiança e o risco do limiar
+            grossura = max(3, altura_texto // 2)
+
+            cv2.rectangle(imagem_bgr, (inicio_barra, meio - grossura // 2), (fim_barra, meio + grossura // 2), COR_TRILHO, cv2.FILLED)
+
+            ponta = inicio_barra + int((fim_barra - inicio_barra) * max(0.0, min(1.0, item.confianca)))
+
+            cv2.rectangle(imagem_bgr, (inicio_barra, meio - grossura // 2), (ponta, meio + grossura // 2), cor, cv2.FILLED)
+
+            x_limiar = inicio_barra + int((fim_barra - inicio_barra) * limiar)
+
+            cv2.line(imagem_bgr, (x_limiar, meio - grossura), (x_limiar, meio + grossura), COR_LIMIAR, max(1, base))
+
+            cv2.putText(
+                imagem_bgr, f"{item.confianca * 100:.0f}%", (fim_barra + 2 * base, meio + altura_texto // 2),
+                FONTE, tamanho_fonte, COR_TEXTO, base, cv2.LINE_AA,
+            )
+
+    return imagem_bgr

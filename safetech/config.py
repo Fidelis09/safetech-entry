@@ -70,7 +70,7 @@ PASTA_IMAGENS_AUDITORIA = PASTA_AUDITORIA / "imagens"
 # para a pasta de imagens dos excluídos.
 PASTA_EXCLUIDOS = PASTA_AUDITORIA / "excluidos"
 
-# Fotos tiradas pelo botão "Capturar foto" da câmera de uma área (a
+# Fotos tiradas pelo botão "Foto" da câmera de uma área (a
 # imagem do momento com as caixas e o carimbo de data, hora e área).
 # Não fazem parte do log: são registros avulsos do operador.
 PASTA_CAPTURAS = PASTA_AUDITORIA / "capturas"
@@ -90,6 +90,23 @@ QUANTIDADE_LOGS_GUARDADOS = 5
 # O que vai para o arquivo: "INFO" (acontecimentos e erros) ou
 # "DEBUG" (muito mais detalhe, para investigar um problema).
 NIVEL_LOG = "INFO"
+
+# Relatórios DIÁRIOS em PDF (um arquivo por dia: AAAA-MM-DD.pdf).
+# Com RELATORIO_DIARIO_AUTOMATICO, ao abrir o programa (e na virada do
+# dia, com ele aberto) o relatório do dia anterior é gerado sozinho, se
+# houve eventos e se ele ainda não existe.
+PASTA_RELATORIOS_DIARIOS = PASTA_RELATORIOS / "diarios"
+RELATORIO_DIARIO_AUTOMATICO = True
+
+# Qualidade do PDF: 150 pontos por polegada fica nítido impresso e o
+# arquivo continua pequeno. Linhas da tabela de irregulares por página.
+RESOLUCAO_PDF_DPI = 150
+LINHAS_POR_PAGINA_PDF = 32
+
+# Indicadores: quantos dias aparecem no gráfico dia a dia, e a meta de
+# conformidade (abaixo dela, a área aparece em vermelho nos gráficos).
+DIAS_NO_GRAFICO_INDICADORES = 14
+META_CONFORMIDADE = 0.90
 
 # Largura máxima (em pixels) da página e da foto no relatório HTML.
 # A foto em tamanho real fica na pasta; isto só limita a exibição.
@@ -361,6 +378,7 @@ MAXIMO_AREAS = 6
 #   resultado_*  -> tabela de auditoria, relatório e painel web
 #   faixa_*      -> faixa de status grande da tela e painel web
 #                   (ok, irregular, analisando e sem ninguém)
+#   telao_*      -> frase do telão (a tela virada para o trabalhador)
 #   palavra_*    -> palavra desenhada no vídeo, junto da caixa (sem
 #                   acento: a fonte do OpenCV não tem acentos)
 TEXTOS_POR_MODO = {
@@ -374,6 +392,10 @@ TEXTOS_POR_MODO = {
         "faixa_analisando": "ANALISANDO",
         "faixa_sem_pessoas": "AGUARDANDO",
         "lugar": "na frente da câmera",
+        "telao_ok": "Pode passar",
+        "telao_irregular": "Coloque antes de passar:",
+        "telao_analisando": "Verificando seus EPIs...",
+        "telao_sem_pessoas": "Aproxime-se da câmera",
     },
     MODO_VIGILANCIA: {
         "resultado_ok": "Conforme",
@@ -385,6 +407,10 @@ TEXTOS_POR_MODO = {
         "faixa_analisando": "ANALISANDO",
         "faixa_sem_pessoas": "AGUARDANDO",
         "lugar": "na área",
+        "telao_ok": "Todos com os EPIs exigidos",
+        "telao_irregular": "Está faltando:",
+        "telao_analisando": "Verificando os EPIs...",
+        "telao_sem_pessoas": "Nenhuma pessoa na área",
     },
 }
 
@@ -458,6 +484,23 @@ SUAVIZACAO_CAIXA = 0.6
 # Limite de análises por segundo da linha de detecção. Acima disso
 # só se gasta processador, sem ganho visível.
 TAXA_MAXIMA_ANALISE_HZ = 15
+
+# --- Aviso de sobrecarga ------------------------------------------
+#
+# Com várias áreas, o computador pode não dar conta de analisar todas.
+# Uma área está LENTA quando faz menos análises por segundo do que o
+# menor destes dois valores:
+#
+#   - SOBRECARGA_FRACAO_MINIMA do que a câmera permite (o menor entre o
+#     fps da câmera e TAXA_MAXIMA_ANALISE_HZ). 0.5 = metade;
+#   - SOBRECARGA_MINIMO_ANALISES por segundo (abaixo disso, quem anda
+#     rápido passa pela câmera sem ser bem avaliado).
+#
+# Lenta por mais de TEMPO_SOBRECARGA_SEG seguidos, aparece o selo
+# "Sobrecarga" no cabeçalho (picos curtos não contam).
+SOBRECARGA_FRACAO_MINIMA = 0.5
+SOBRECARGA_MINIMO_ANALISES = 4
+TEMPO_SOBRECARGA_SEG = 5.0
 
 
 # ============================================================
@@ -542,15 +585,42 @@ SUBTITULO_PRODUTO = "Controle de acesso e fiscalização de EPI por visão compu
 TAMANHO_INICIAL_JANELA = "1360x860"
 TAMANHO_MINIMO_JANELA = (1080, 740)
 
+# Parte da largura da janela que o monitoramento (câmeras) ocupa ao
+# abrir; o resto é da auditoria. O divisor entre os dois pode ser arrastado.
+FRACAO_LARGURA_MONITORAMENTO = 0.56
+
 # Tamanho da janela de Configurações (largura, altura), em pixels a
 # 100% de escala do monitor
 TAMANHO_JANELA_CONFIGURACOES = (720, 620)
 
+# Telão da catraca: tela virada para o trabalhador, com o resultado em
+# letras gigantes e os ícones dos EPIs que faltam.
+#   TELAO_MOSTRAR_VIDEO -> imagem da câmera num canto (a pessoa se vê)
+#   QUADROS_POR_SEGUNDO_TELAO -> quantas vezes por segundo o vídeo do
+#       telão é redesenhado (o resultado muda na hora, sempre)
+TAMANHO_JANELA_TELAO = (1280, 720)
+TELAO_MOSTRAR_VIDEO = True
+QUADROS_POR_SEGUNDO_TELAO = 10
+
+# Assistente de configuração: abre sozinho na primeira vez que o
+# programa é aberto (False = só pelo botão em Configurações > Sistema)
+ASSISTENTE_NA_PRIMEIRA_EXECUCAO = True
+TAMANHO_JANELA_ASSISTENTE = (760, 560)
+
+# Tamanho da janela de Indicadores (largura, altura), a 100% de escala
+TAMANHO_JANELA_INDICADORES = (1100, 760)
+
+# Com a janela de Indicadores aberta, de quanto em quanto tempo (s) ela
+# é refeita (os eventos novos entram sozinhos). Também é o intervalo em
+# que se confere a virada do dia para o relatório diário.
+INTERVALO_ATUALIZAR_INDICADORES_SEG = 5.0
+
 # Intervalo (ms) do laço de atualização da tela. 33 ms = ~30 quadros/s
 INTERVALO_TELA_MS = 33
 
-# Máximo de linhas exibidas na tabela de auditoria (as mais recentes).
-# Os totais dos cartões continuam contando o período inteiro.
+# Linhas mostradas de cada vez na tabela de auditoria (as mais recentes).
+# Com mais eventos, o botão "Mostrar mais" acrescenta outras tantas. Os
+# totais dos cartões e a exportação contam o período inteiro.
 MAXIMO_LINHAS_TABELA = 500
 
 # Períodos da auditoria na tela: nome -> quantos dias para trás contam
@@ -631,6 +701,14 @@ PAINEL_WEB_SENHA_MINIMA = 6
 # serviços do sistema.
 PAINEL_WEB_PORTA_MINIMA = 1024
 PAINEL_WEB_PORTA_MAXIMA = 65535
+
+# Limite de logins errados: depois de TENTATIVAS_MAXIMAS erros dentro de
+# JANELA_TENTATIVAS_SEG, aquele aparelho fica BLOQUEIO_SEG sem poder
+# tentar (mesmo com a senha certa). Impede adivinhar a senha na força
+# bruta; os outros aparelhos continuam entrando.
+PAINEL_WEB_TENTATIVAS_MAXIMAS = 5
+PAINEL_WEB_JANELA_TENTATIVAS_SEG = 300
+PAINEL_WEB_BLOQUEIO_SEG = 300
 
 # Quantas vezes o cálculo do hash da senha é repetido. Mais = mais
 # lento para quem tenta adivinhar senhas (e um pouco mais lento para

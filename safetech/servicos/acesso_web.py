@@ -184,3 +184,83 @@ def montar_ajustes(atuais, ativo, na_rede, porta, exigir_login, usuario, nova_se
         return None, "Para exigir login, defina uma senha."
 
     return replace(atuais, ativo=ativo, na_rede=na_rede, porta=porta, usuario=usuario, hash_senha=hash_senha), None
+
+
+# ============================================================
+# LIMITE DE TENTATIVAS DE LOGIN
+# ============================================================
+#
+# Sem limite, alguém na rede poderia tentar senhas sem parar até
+# acertar. Depois de PAINEL_WEB_TENTATIVAS_MAXIMAS logins errados dentro
+# de PAINEL_WEB_JANELA_TENTATIVAS_SEG, aquele endereço (computador ou
+# celular) fica bloqueado por PAINEL_WEB_BLOQUEIO_SEG, mesmo que depois
+# acerte a senha. Os outros aparelhos continuam entrando normalmente.
+#
+# Um pedido SEM login (o navegador sempre pergunta antes) não conta como
+# erro: só conta quem mandou usuário e senha e errou.
+# ============================================================
+
+class LimiteDeTentativas:
+
+    def __init__(self, maximo=None, janela_seg=None, bloqueio_seg=None, relogio=None):
+        """
+        relogio -> função que dá o tempo em segundos (os testes passam
+                   um relógio falso para não precisar esperar minutos)
+        """
+
+        import threading
+        import time
+
+        self._maximo = maximo or config.PAINEL_WEB_TENTATIVAS_MAXIMAS
+        self._janela = janela_seg or config.PAINEL_WEB_JANELA_TENTATIVAS_SEG
+        self._bloqueio = bloqueio_seg or config.PAINEL_WEB_BLOQUEIO_SEG
+        self._relogio = relogio or time.monotonic
+
+        # endereço -> momentos dos erros recentes; endereço -> fim do bloqueio
+        self._erros = {}
+        self._bloqueados = {}
+
+        # Vários pedidos chegam ao mesmo tempo (uma thread por pedido)
+        self._trava = threading.Lock()
+
+    def bloqueado_por(self, endereco) -> float:
+        """Segundos que faltam para o endereço poder tentar de novo (0 = liberado)."""
+
+        with self._trava:
+
+            fim = self._bloqueados.get(endereco, 0.0)
+            restante = fim - self._relogio()
+
+            if restante <= 0:
+                self._bloqueados.pop(endereco, None)
+                return 0.0
+
+            return restante
+
+    def registrar_falha(self, endereco) -> bool:
+        """Conta um login errado. Devolve True se o endereço acabou de ser bloqueado."""
+
+        with self._trava:
+
+            agora = self._relogio()
+
+            # Só contam os erros dentro da janela de tempo
+            recentes = [momento for momento in self._erros.get(endereco, []) if agora - momento < self._janela]
+            recentes.append(agora)
+
+            if len(recentes) >= self._maximo:
+
+                self._erros.pop(endereco, None)
+                self._bloqueados[endereco] = agora + self._bloqueio
+
+                return True
+
+            self._erros[endereco] = recentes
+
+            return False
+
+    def registrar_sucesso(self, endereco):
+        """Login certo: os erros anteriores daquele endereço são esquecidos."""
+
+        with self._trava:
+            self._erros.pop(endereco, None)

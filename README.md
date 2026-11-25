@@ -35,7 +35,7 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - **Fotos de evidência carimbadas**: data e hora, área, pessoa e resultado gravados na própria foto.
 - **Bipe de acesso negado** no modo Catraca (pode ser desligado no `config.py`).
 - **Tema escuro e tema claro**, no programa (botão no cabeçalho, troca na hora e fica salvo) e no painel web (botão próprio, guardado no navegador).
-- **Capturar foto**: guarda o momento de uma câmera (com caixas e carimbo) em `auditoria/capturas/`, fora do log.
+- **Foto**: guarda o momento de uma câmera (com caixas e carimbo) em `auditoria/capturas/`, fora do log.
 - **EPIs reconhecidos separadamente**: o modelo dá uma resposta independente para cada equipamento.
 - **Fiscalização por setor**: perfis prontos (cada setor com seus EPIs obrigatórios) e caixas de seleção para ajustar na hora. A última seleção é lembrada ao reabrir o programa.
 - **Várias pessoas ao mesmo tempo** (fila): cada uma recebe uma caixa que a acompanha, com número e o que está faltando.
@@ -45,17 +45,23 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 - **Status em destaque**: na catraca, liberado (verde) ou negado (vermelho); na vigilância, em conformidade ou não conforme; e analisando (laranja) ou aguardando.
 - **Confiança mínima e intervalo de análise** ajustáveis na tela, com efeito imediato.
 - **Auditoria na mesma tela**: indicadores, filtros (resultado, **período** e busca), ordenação por coluna e foto de evidência do evento selecionado. Cada evento guarda o setor, o que era exigido e o que faltava.
-- **Exportar CSV**: o que está filtrado vai para uma planilha que o Excel em português abre direto (também pelo painel web).
+- **Exportar**: o que está filtrado vai para uma planilha que o Excel em português abre direto (também pelo painel web).
 - **Relatório de um evento**: um clique gera uma página com todos os dados do momento da linha selecionada, a foto e os outros eventos do mesmo instante.
 - **Excluir linha sem perder o registro**: o evento sai da tabela, mas vai para uma pasta de excluídos, com a data da exclusão.
 - **Catraca de demonstração com ESP32**: maquete com cancela (servo), LEDs, bipe e tela que obedece ao sistema pelo Wi-Fi (pasta `catraca_esp32/`).
 - **Várias câmeras (áreas)**: cada área abre numa aba, com a sua própria câmera, setor, EPIs e modo. A auditoria continua uma só, com a área de cada evento.
-- **Testes automatizados**: 209 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
+- **Telão da catraca** (F2): tela para o trabalhador, com LIBERADO/NEGADO em letras gigantes e os **ícones dos EPIs que faltam**.
+- **Indicadores**: EPI que mais falta, conformidade por área e por dia, horários críticos, e **relatório em PDF** (inclusive um relatório diário gerado sozinho).
+- **Modo calibração**: barras de confiança de cada EPI sobre cada pessoa no vídeo, com o controle do limiar ao lado, para ajustar vendo o efeito.
+- **Assistente de primeira execução**, **backup e restauração** das configurações e **atalho na área de trabalho** (abre sem terminal).
+- **Testes automatizados**: 279 testes cobrindo regras de decisão, auditoria, câmera IP, painel web e a janela.
 - **Coleta de dataset rotulada**: marque o que a pessoa está usando e salve, por botão ou atalho de teclado.
 - **Painel web ajustado na tela**: ligar, porta, acesso pela rede, usuário e senha em **Configurações > Painel web**. A senha fica guardada só como hash.
 - **Painel web do gerente**, somente leitura: status ao vivo, indicadores, gráfico e fotos pelo navegador, inclusive no celular.
 - **Abertura imediata**: a janela aparece na hora e o modelo de IA carrega em segundo plano.
 - **Registro de erros em arquivo** (`logs/safetech.log`, com tamanho limitado) e **análise que se recupera sozinha**: se a análise de uma câmera quebrar, ela recomeça em alguns segundos.
+- **Aviso de sobrecarga**: um selo no cabeçalho avisa quando alguma área está analisando devagar demais (o computador não está dando conta).
+- **Horário com fuso** (ISO 8601) em cada evento da auditoria, no relatório e na planilha.
 
 ---
 
@@ -96,6 +102,16 @@ Projeto acadêmico (desafio de segurança do trabalho). Esta etapa cobre apenas 
 
 3. Para melhorar o reconhecimento, colete mais imagens e treine (veja [Coleta de imagens e re-treino](#coleta-de-imagens-e-re-treino)).
 
+4. Opcional: crie o atalho na área de trabalho, para abrir o programa com dois cliques, sem terminal:
+
+   ```powershell
+   python instalador\criar_atalho.py
+   ```
+
+   Para levar o programa a um computador **sem Python** (um `.exe` com tudo dentro), veja `instalador/LEIA-ME.md`.
+
+Na primeira vez que o programa abre, o **assistente de configuração** pergunta a câmera, o setor e o modo da área e a senha do painel web. Ele pode ser reaberto em **Configurações > Sistema**.
+
 ---
 
 ## Como usar
@@ -116,13 +132,17 @@ A tela principal tem só o que se usa durante a operação. Em cima, a marca, os
 |---|---|
 | **Cabeçalho** | Selos com ponto colorido: **IA** (carregando, pronta com quantos EPIs, ou com erro), **Painel web** (clique abre no navegador) e **Catraca** (conectada ou procurando). Botão **Tema claro / Tema escuro** (troca na hora; a escolha fica salva). À direita, data e hora. |
 | **Barra de áreas** | **Visão geral** (todas as câmeras lado a lado, com 2 áreas ou mais), uma **pílula por área** com um ponto na cor da situação dela agora (verde, vermelho, amarelo, cinza) e **+ Nova área**. A área que comanda a catraca tem "· catraca" no nome. |
-| **Câmera da área** | Em cima do vídeo: qual câmera a área usa e os botões **Trocar câmera** (abre as Configurações já na área), **Capturar foto** e **▶ Iniciar / ■ Parar câmera**. Com a câmera desligada, o vídeo dá lugar a uma tela de espera com o botão de ligar no meio. |
+| **Câmera da área** | Em cima do vídeo: qual câmera a área usa e os botões **Trocar câmera** (abre as Configurações já na área), **Calibrar** (barras de confiança de cada EPI sobre as pessoas e o controle da confiança mínima logo abaixo do vídeo), **Foto** e **▶ Iniciar / ■ Parar câmera**. Com a câmera desligada, o vídeo dá lugar a uma tela de espera com o botão de ligar no meio. |
 | **Vídeo** | Imagem da câmera com um contorno fino por pessoa e uma única palavra: verde `OK`, vermelho `NEGADO`, cinza `...` (ainda analisando). O contorno é discreto de propósito, para não cobrir ninguém quando há muita gente. Em cima, as legendas: "● AO VIVO", área, data e hora à esquerda; resolução, fps, análises/s e pessoas à direita. |
 | **Faixa de status** | Símbolo (✔ ✖ ◔ ●) e decisão geral, quantas pessoas estão irregulares, em quantas falta cada EPI e o que o setor exige. Liberado, negado e analisando enchem a faixa de cor (para ver de longe); aguardando e câmera desligada ficam num cartão discreto. O detalhe por pessoa fica na auditoria. |
 | **Visão geral** | Todas as câmeras lado a lado, cada uma com a sua situação e a borda na cor dela. Passar o mouse destaca o quadro; clicar abre a página da área (a pílula **Visão geral** volta para cá). Câmera desligada tem o botão **Ligar câmera** no próprio quadro. |
-| **Fiscalização (abaixo do vídeo)** | **Setor**, **Modo** (Catraca ou Vigilância) e os **EPIs exigidos** como botões que ligam e desligam (azul com ✓ = exigido). Valem só para aquela área. |
+| **Fiscalização (abaixo do vídeo)** | **Setor**, **Modo** (Catraca ou Vigilância) e os **EPIs exigidos** como botões com o ícone do EPI, que ligam e desligam (azul com ✓ = exigido). Valem só para aquela área. |
+| **Telão** | Botão no topo do monitoramento (ou F2): abre a tela do trabalhador (veja [Telão da catraca](#telão-da-catraca)). |
 | **Configurações** | Botão no topo do monitoramento: abre a janela com o resto (veja abaixo). |
-| **Auditoria** | Acompanha a esquerda: com uma área aberta, mostra **só os eventos dela** (o título diz "Auditoria · Portaria"); na **Visão geral**, os de **todas as áreas**. Cartões, tabela e exportação seguem junto. Indicadores do período, filtros (Todos / Conformes / Irregulares, período e busca) e tabela de eventos, atualizados ao vivo. Clique em um evento para ver a foto, o que era exigido e a confiança de cada EPI; duplo clique abre a foto em tamanho real. Clique no título de uma coluna para ordenar. No cabeçalho: **Exportar CSV**, **Abrir pasta** e **Zerar**. No cartão **Evento selecionado**, embaixo: **Salvar relatório** e **Excluir**. |
+| **Rodapé** | O último aviso, com a hora, e **F1: atalhos de teclado**. |
+| **Auditoria** | Acompanha a esquerda: com uma área aberta, mostra **só os eventos dela** (o título diz "Auditoria · Portaria"); na **Visão geral**, os de **todas as áreas**. Cartões, tabela e exportação seguem junto. Indicadores do período, filtros (Todos / Conformes / Irregulares, período e busca) e tabela de eventos, atualizados ao vivo. O período tem **Escolher datas...** (de um dia a outro); **Colunas** escolhe o que a tabela mostra (fica salvo). A tabela mostra 500 eventos por vez; **Mostrar mais 500**, embaixo, traz os seguintes. Clique em um evento para ver a foto e, ao lado, uma barra por EPI com o ícone e a confiança (vermelha = faltou, verde = exigido e usado, cinza = não exigido); duplo clique abre a foto em tamanho real. Clique no título de uma coluna para ordenar. No cabeçalho: **Indicadores**, **Exportar** e **Mais ▾** (abrir a pasta da auditoria, zerar). No cartão **Evento selecionado**, embaixo: **Salvar relatório** e **Excluir**. |
+
+Os avisos (relatório salvo, câmera que não abriu, erro ao exportar...) aparecem como **cartões** no canto de baixo, na cor do tipo (verde = deu certo, vermelho = erro, amarelo = atenção), e somem sozinhos; o último fica no rodapé. Parar o mouse sobre um botão mostra uma **dica** do que ele faz. As confirmações (zerar, excluir, remover área ou câmera, restaurar backup) abrem numa caixa com as cores do tema, e o botão da ação perigosa é vermelho, com o foco no **Cancelar**.
 
 ### Configurações
 
@@ -134,6 +154,7 @@ O botão **Configurações** abre uma janela com abas. Tudo vale na hora e fica 
 | **Painel web** | **Ligar o painel**, **acesso pela rede** (ou só este computador), **porta**, **exigir usuário e senha**, **usuário** e **nova senha** (com confirmação e "Mostrar senha"). Vale ao clicar em **Aplicar**: o painel reinicia na hora e o resultado aparece embaixo (ex.: "porta em uso"). Avisa se ainda é a senha padrão ou se está sem senha. **Abrir no navegador** abre o painel |
 | **Análise** | **Confiança mínima** (mais alto = mais rigoroso) e **intervalo de análise** (de quanto em quanto tempo cada pessoa é verificada de novo), com **Voltar aos valores padrão**. Valem para todas as áreas |
 | **Coleta de imagens** | O que a pessoa na câmera está usando, **Salvar imagem da câmera**, **Enviar arquivo...** e o resumo do dataset |
+| **Sistema** | **Abrir o assistente...**, **Salvar backup...** / **Restaurar backup...** das configurações (áreas, câmeras, ajustes, tema, painel web; não leva a auditoria) e **Abrir pasta de logs**. Ao restaurar, as configurações de antes ficam guardadas numa cópia e o programa fecha para as novas valerem |
 
 ### Várias câmeras: áreas
 
@@ -226,14 +247,36 @@ Dicas:
 
 | Tecla | Ação |
 |---|---|
+| `F1` | Mostra ou esconde a lista de atalhos sobre a janela |
 | `Espaço` | Liga ou desliga a câmera |
 | `S` | Salva uma imagem da câmera com os rótulos marcados em **Configurações > Coleta de imagens** (funciona com a janela fechada) |
 | `Ctrl+V` | Cola no dataset uma imagem copiada (ou arquivos de imagem copiados), com os rótulos marcados |
-| `F11` | Tela cheia (monitor da portaria, apresentação) |
-| `Esc` | Sai da tela cheia; fora dela, limpa a busca da auditoria |
+| `F2` | Abre ou fecha o telão do trabalhador |
+| `F11` | Tela cheia (monitor da portaria, apresentação); no telão, a tela cheia do telão |
+| `Esc` | Fecha a lista de atalhos; sai da tela cheia; fora disso, limpa a busca da auditoria |
 | `Delete` | Exclui a linha selecionada na tabela de auditoria (com confirmação) |
 
 Os atalhos ficam desativados enquanto você digita no campo de busca.
+
+### Telão da catraca
+
+A janela principal é para o **operador**. O telão é para o **trabalhador** que está na frente da câmera: ele precisa entender em um segundo, de longe, se pode passar e o que falta.
+
+- Abra pelo botão **Telão** (ou F2), arraste a janela para o monitor virado para a fila e aperte **F11** (tela cheia). **Esc** sai da tela cheia; de novo, fecha o telão.
+- A tela inteira fica na cor do resultado. **ACESSO LIBERADO** (verde, "Pode passar", com os ícones do que foi exigido), **ACESSO NEGADO** (vermelho, "Coloque antes de passar:" e os **ícones dos EPIs que faltam**: capacete, óculos, colete, luvas), **ANALISANDO** (amarelo) ou **AGUARDANDO** (cinza, "Aproxime-se da câmera").
+- No canto, a imagem da câmera (a pessoa se vê). Desligue com `TELAO_MOSTRAR_VIDEO = False`.
+- O telão segue a área que **comanda a catraca**; sem nenhuma marcada, a área aberta. No modo vigilância, os textos são os de conformidade.
+
+### Indicadores e relatório em PDF
+
+O botão **Indicadores**, na auditoria, abre uma janela com, para o período e a área escolhidos:
+
+- **Eventos**, **Conformidade** (com a meta de `META_CONFORMIDADE`), **EPI que mais falta** e **Horário crítico** (a hora do dia com mais irregulares);
+- os gráficos: EPIs que mais faltam, conformidade por área (vermelha abaixo da meta), irregulares por dia e irregulares por hora do dia.
+
+**Salvar PDF** grava o mesmo conteúdo num relatório para imprimir (folha A4): a primeira página com os números e os gráficos; as seguintes com a lista dos eventos irregulares.
+
+**Relatório diário automático**: ao abrir o programa, e na virada do dia com ele aberto, o relatório do dia anterior é gerado sozinho em `auditoria/relatorios/diarios/AAAA-MM-DD.pdf` (se houve eventos e se ainda não existe). Desligue com `RELATORIO_DIARIO_AUTOMATICO = False`.
 
 ### Testar o modelo com uma foto
 
@@ -254,7 +297,7 @@ Página de acompanhamento pelo navegador, **somente leitura**: o gerente vê os 
 1. Abra o aplicativo (`python app.py`). O painel web sobe junto.
 2. O endereço aparece no selo do cabeçalho da janela, por exemplo `Painel web: http://192.168.0.15:8080`. Clicar nele abre o navegador. Selo amarelo = ainda com a senha padrão ou sem senha; "Painel web desligado" = clique para ir às Configurações.
 3. No computador do gerente (ou no celular), na **mesma rede**, digite esse endereço.
-4. Informe o login definido em **Configurações > Painel web**. Até a primeira troca, vale o do `safetech/config.py` (usuário `gerente`); **troque a senha antes de usar de verdade**, porque a padrão está no repositório.
+4. Entre com o login definido em **Configurações > Painel web**, na tela de entrada do próprio painel (o botão **Sair**, no cabeçalho, volta a ela). Até a primeira troca, vale o do `safetech/config.py` (usuário `gerente`); **troque a senha antes de usar de verdade**, porque a padrão está no repositório.
 
 Na primeira vez, o Windows pode perguntar se o Python pode aceitar conexões da rede. É preciso permitir para que outros aparelhos acessem.
 
@@ -266,11 +309,13 @@ Na primeira vez, o Windows pode perguntar se o Python pode aceitar conexões da 
 | **Ao vivo** | Imagem atual da câmera com as caixas, o setor em fiscalização e o que ele exige, status da catraca e o que falta para cada pessoa. Atualiza a cada segundo. |
 | **Hoje** | Eventos, conformes, irregulares e taxa de conformidade do dia, com o total do histórico abaixo de cada número. "Conforme" é quem foi liberado (catraca) ou estava com os EPIs (vigilância). |
 | **Eventos por hora** | Gráfico de barras do dia. Passar o mouse numa hora mostra os números. |
-| **Eventos de auditoria** | Os eventos mais recentes, com miniatura da foto, setor, EPIs exigidos e o que faltava, além de filtros e busca. Clicar numa linha abre a foto em tamanho grande. **Exportar CSV** baixa o histórico inteiro numa planilha (só leitura: é um download). |
+| **Eventos de auditoria** | Os eventos mais recentes, com miniatura da foto, setor, EPIs exigidos e o que faltava, além de filtros (resultado, **área** e **de/até** uma data) e busca. Clicar numa linha abre a foto em tamanho grande. **Exportar CSV** baixa o histórico inteiro numa planilha (só leitura: é um download). |
 
 O gerente **vê** qual setor está sendo fiscalizado, mas não consegue mudá-lo: a escolha do setor é feita só no aplicativo.
 
 A página funciona em celular e não depende de internet (não carrega nada de fora). O botão **Tema claro / Tema escuro** do cabeçalho muda só a aparência naquele navegador (a escolha fica guardada nele); sem escolha, a página segue o tema do sistema do aparelho.
+
+No celular, **Adicionar à tela inicial** (Chrome: menu ⋮; Safari: compartilhar) cria um atalho com o ícone do SafeTech. Como a conexão é HTTP, o navegador não instala o painel como aplicativo completo (isso exige HTTPS): é um atalho que abre a página.
 
 ### Catraca de demonstração (ESP32)
 
@@ -292,7 +337,8 @@ Sobe o mesmo painel sem câmera: indicadores, gráfico, eventos e fotos. Não ab
 ### Segurança
 
 - **Somente leitura de verdade**: o servidor só responde a pedidos de leitura (GET). Qualquer tentativa de envio ou alteração é recusada, e não existe rota que mude o sistema.
-- **Login obrigatório**: o painel mostra fotos de pessoas, então pede usuário e senha. **Troque a senha padrão** em Configurações > Painel web antes de usar fora de testes.
+- **Login obrigatório**: o painel mostra fotos de pessoas, então pede usuário e senha. Sem login, o servidor entrega só a página (com a tela de entrada) e os ícones; dados, imagens e a planilha respondem "401". A tela de entrada não envia nada: o login vai no cabeçalho de cada leitura, guardado só enquanto a aba estiver aberta. **Troque a senha padrão** em Configurações > Painel web antes de usar fora de testes.
+- **Limite de tentativas**: depois de 5 logins errados em 5 minutos, aquele aparelho fica 5 minutos sem poder tentar (resposta "429 Muitas tentativas"), mesmo com a senha certa. Os outros aparelhos continuam entrando. Cada bloqueio fica registrado em `logs/safetech.log`.
 - **A senha não fica guardada**: o `preferencias.json` (fora do git) guarda só um hash PBKDF2 com sal aleatório. Quem abrir o arquivo não descobre a senha. Conferir uma senha é lento de propósito (~0,1 s); o servidor lembra dos logins já conferidos para não repetir o cálculo a cada pedido.
 - **Só as fotos de evidência são servidas**: pedidos que tentam alcançar outros arquivos do computador são recusados.
 - **Limite conhecido**: a conexão é HTTP simples, sem criptografia. Use apenas em rede local de confiança, nunca exposto à internet.
@@ -395,6 +441,8 @@ Tech_day_26.2/
 │   │   ├── tipos.py            Estruturas de dados trocadas entre os módulos
 │   │   ├── epis.py             Quais EPIs o modelo instalado reconhece
 │   │   ├── modos.py            Textos de cada modo (catraca / vigilância)
+│   │   ├── horario.py          Data e hora com fuso (gravar, ler e mostrar)
+│   │   ├── icones.py           Desenho dos ícones (escudo e EPIs)
 │   │   ├── detector.py         Escolhe o detector conforme o modo (catraca = rosto, vigilância = corpo)
 │   │   ├── detector_rosto.py   Encontra as pessoas pelo rosto (YuNet)
 │   │   ├── detector_corpo.py   Encontra as pessoas pelo corpo inteiro (YOLOX)
@@ -411,16 +459,21 @@ Tech_day_26.2/
 │   │   ├── catraca_serial.py   Envia o status à catraca ESP32 pelo cabo USB
 │   │   ├── dataset.py          Salva imagens de treino com os rótulos
 │   │   ├── importacao.py       Abre imagens de arquivo ou da área de transferência
-│   │   ├── capturas.py         Fotos do botão "Capturar foto"
+│   │   ├── capturas.py         Fotos do botão "Foto"
 │   │   ├── acesso_web.py       Ajustes do painel web e hash da senha
 │   │   ├── log_erros.py        Registro de erros em logs/safetech.log
+│   │   ├── indicadores.py      Contas dos indicadores (EPI que mais falta, por área, por dia, por hora)
+│   │   ├── graficos.py         Gráficos de barras desenhados como imagem (janela e PDF)
+│   │   ├── relatorio_pdf.py    Relatório de indicadores em PDF (e o diário)
+│   │   ├── backup.py           Backup e restauração das configurações
 │   │   └── preferencias.py     Lembra setor, EPIs, câmera e câmeras IP
 │   │
 │   ├── interface/          A janela (Tkinter)
 │   │   ├── tema.py                  Cores, fontes e estilos
 │   │   ├── area_monitorada.py       Uma área: câmera + análise + aba (e o desenho dela)
 │   │   ├── painel_visao_geral.py    Visão geral: todas as áreas lado a lado
-│   │   ├── componentes.py           Selos do cabeçalho e barra de áreas (pílulas)
+│   │   ├── componentes.py           Selos, barra de áreas, dicas, avisos em cartões, lista de atalhos
+│   │   ├── dialogos.py              Confirmações e escolha de datas com as cores do tema
 │   │   ├── painel_monitoramento.py  A aba de uma área: vídeo, status, setor, modo, EPIs e câmera
 │   │   ├── dialogo_area.py          Janela "Nova área" / "Renomear área"
 │   │   ├── painel_auditoria.py      Indicadores, filtros, tabela e evidência
@@ -433,6 +486,12 @@ Tech_day_26.2/
 │   │   ├── controlador_coleta.py    Coleta e importação de imagens do dataset
 │   │   ├── controlador_painel_web.py Liga e reinicia o painel web
 │   │   ├── controlador_catraca.py   Catraca ESP32 pelo cabo
+│   │   ├── controlador_indicadores.py Janela de indicadores, PDF e relatório diário
+│   │   ├── controlador_telao.py     Telão do trabalhador
+│   │   ├── controlador_sistema.py   Assistente, backup e restauração, logs
+│   │   ├── janela_indicadores.py    Janela de indicadores (números e gráficos)
+│   │   ├── janela_telao.py          Telão: resultado gigante e ícones do que falta
+│   │   ├── assistente.py            Assistente de configuração (5 passos)
 │   │   └── janela_principal.py      Monta a tela e liga os controladores
 │   │
 │   ├── web/                Painel web do gerente (somente leitura)
@@ -448,6 +507,7 @@ Tech_day_26.2/
 │   └── rotulos.csv         Quais EPIs aparecem em cada imagem
 ├── preferencias.json       Seleções e câmeras IP (gerado pelo programa)
 ├── logs/                   Registro de erros: safetech.log (gerado pelo programa)
+├── instalador/             Atalho na área de trabalho e receita do .exe (PyInstaller)
 └── auditoria/              Gerada pelo programa
     ├── log_auditoria.csv
     ├── arquivados/         Logs e fotos anteriores, movidos pelo botão Zerar
@@ -541,7 +601,7 @@ O log fica em `auditoria/log_auditoria.csv`, e as fotos em `auditoria/imagens/`.
 
 | Coluna | Conteúdo |
 |---|---|
-| `timestamp` | Data e hora do evento |
+| `timestamp` | Data e hora do evento, com o fuso (ISO 8601), ex.: `2026-11-25T09:18:51-03:00`. Eventos gravados antes desta versão não têm o fuso (`2026-11-24 14:10:32`) e continuam valendo. Na tela aparece sem o "T" e sem o fuso; no relatório e na planilha (coluna **Fuso (UTC)**) o fuso aparece |
 | `evento` | `ENTRADA` (primeira decisão da pessoa) ou `MUDANCA` (a decisão mudou) |
 | `pessoa` | Identificação da pessoa na sessão, ex.: `P003` |
 | `setor` | Setor que estava sendo fiscalizado |
@@ -555,19 +615,19 @@ O log fica em `auditoria/log_auditoria.csv`, e as fotos em `auditoria/imagens/`.
 
 Logs de versões anteriores, sem a coluna `modo`, são convertidos ao abrir o programa: os eventos ganham o modo `catraca` e o arquivo original fica guardado como `log_auditoria_formato_antigo_<data>.csv`.
 
-As fotos do botão **Capturar foto** (da câmera de uma área) ficam em `auditoria/capturas/`, com as caixas e o mesmo carimbo, mas **não** entram no log: são registros avulsos do operador.
+As fotos do botão **Foto** (da câmera de uma área) ficam em `auditoria/capturas/`, com as caixas e o mesmo carimbo, mas **não** entram no log: são registros avulsos do operador.
 
 Cada evento tem uma foto do frame inteiro, com a pessoa em questão destacada e um **carimbo** no rodapé (ex.: `SafeTech Entry | 2026-11-24 14:10:32 | Area: Portaria | P003 | Negado`). Assim a foto continua dizendo de quando e de onde é, mesmo copiada para fora do sistema. Desligue com `CARIMBAR_EVIDENCIA = False`.
 
 ### Exportar para planilha
 
-**Exportar CSV**, no cabeçalho da auditoria, grava numa planilha **o que está filtrado na tela** (área aberta, período, resultado e busca). Para exportar todas as áreas juntas, abra a **Visão geral** antes. Os cabeçalhos saem por extenso ("Data e hora", "Área", "Resultado"...), o resultado no texto do modo ("Liberado", "Não conforme") e o arquivo usa `;` e a marca UTF-8 que o Excel em português precisa para abrir direto, com acentos. O log de auditoria não muda.
+**Exportar**, no cabeçalho da auditoria, grava numa planilha **o que está filtrado na tela** (área aberta, período, resultado e busca). Para exportar todas as áreas juntas, abra a **Visão geral** antes. Os cabeçalhos saem por extenso ("Data e hora", "Área", "Resultado"...), o resultado no texto do modo ("Liberado", "Não conforme") e o arquivo usa `;` e a marca UTF-8 que o Excel em português precisa para abrir direto, com acentos. O log de auditoria não muda.
 
-O **período** (Hoje, Últimos 7 dias, Últimos 30 dias, Todo o histórico) vale para os cartões de totais, a tabela e a exportação. Os períodos ficam em `PERIODOS_AUDITORIA`, no `config.py`.
+O **período** (Hoje, Últimos 7 dias, Últimos 30 dias, Todo o histórico ou **Escolher datas...**, que pede o primeiro e o último dia) vale para os cartões de totais, a tabela e a exportação. Os períodos ficam em `PERIODOS_AUDITORIA`, no `config.py`.
 
 ### Zerar a auditoria
 
-O botão **Zerar**, no cabeçalho do painel de auditoria, recomeça tudo do zero: esvazia a tabela, os indicadores, o log e a pasta de fotos, e faz as pessoas que estão na câmera contarem como novas (a numeração volta a `P001`). O painel web também passa a mostrar zero.
+**Zerar a auditoria...**, no menu **Mais ▾** do cabeçalho da auditoria, recomeça tudo do zero: esvazia a tabela, os indicadores, o log e a pasta de fotos, e faz as pessoas que estão na câmera contarem como novas (a numeração volta a `P001`). O painel web também passa a mostrar zero.
 
 O programa pede confirmação antes. E **nada é apagado**: o log e as fotos são movidos para `auditoria/arquivados/<data e hora>/`. Para liberar espaço em disco de verdade, exclua essa pasta à mão.
 
@@ -648,6 +708,13 @@ Os ajustes ficam em `safetech/config.py`. Os mais úteis:
 | `PAINEL_WEB_PORTA` | `8080` | Porta do painel web (idem) |
 | `PAINEL_WEB_USUARIO` / `PAINEL_WEB_SENHA` | `gerente` / (veja o arquivo) | Login inicial do painel (idem). Troque pela tela |
 | `PAINEL_WEB_SENHA_MINIMA` | `6` | Tamanho mínimo de uma senha nova |
+| `PAINEL_WEB_TENTATIVAS_MAXIMAS` / `..._JANELA_TENTATIVAS_SEG` / `..._BLOQUEIO_SEG` | `5` / `300` / `300` | Logins errados tolerados, em quanto tempo, e por quanto tempo o aparelho fica bloqueado |
+| `SOBRECARGA_FRACAO_MINIMA` / `SOBRECARGA_MINIMO_ANALISES` / `TEMPO_SOBRECARGA_SEG` | `0.5` / `4` / `5` | Quando uma área conta como lenta (selo "Sobrecarga") |
+| `RELATORIO_DIARIO_AUTOMATICO` | `True` | Gera sozinho o PDF do dia anterior em `auditoria/relatorios/diarios/` |
+| `META_CONFORMIDADE` | `0.90` | Meta de conformidade dos indicadores (abaixo dela, a área fica vermelha) |
+| `TELAO_MOSTRAR_VIDEO` | `True` | Imagem da câmera no canto do telão |
+| `ASSISTENTE_NA_PRIMEIRA_EXECUCAO` | `True` | Abre o assistente de configuração na primeira vez |
+| `ESPERA_REINICIO_ANALISE_SEG` / `MAXIMO_REINICIOS_ANALISE` | `3` / `5` | Reinício automático da análise de uma área depois de um erro |
 | `ITERACOES_HASH_SENHA` | `200000` | Repetições do hash da senha (mais = mais difícil de adivinhar) |
 
 ---
@@ -686,7 +753,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Saída esperada: `209 passed` em menos de um minuto.
+Saída esperada: `279 passed` em menos de um minuto.
 
 | Arquivo | O que testa |
 |---|---|
@@ -697,6 +764,9 @@ Saída esperada: `209 passed` em menos de um minuto.
 | `test_camera.py` | Câmera IP: conexão, queda e reconexão, endereço errado, senha escondida; webcam que cai e reabre sozinha |
 | `test_analisador.py` | Linha de análise completa: decisão, uma foto por pessoa, troca de setor |
 | `test_painel_web.py` | Painel web: login, somente leitura, proteção das pastas, situação de cada área, imagem por área, download da planilha |
+| `test_funcoes_novas.py` | Indicadores, gráficos e PDF (páginas, relatório diário só com eventos), telão (o que mostra em cada caso, ícones, abrir e fechar), modo calibração, backup e restauração (arquivo inválido não muda nada), assistente de configuração e ícone do instalador |
+| `test_interface_ux.py` | Avisos em cartões (tipo, limite, somem sozinhos), lista de atalhos (F1/Esc), dicas, barras do evento selecionado, colunas salvas, "mostrar mais", período com datas escolhidas, ícones nos EPIs exigidos e no relatório, confirmações com o tema |
+| `test_fuso_login_sobrecarga.py` | Horário com fuso (e logs antigos sem fuso), planilha com a coluna do fuso, limite de logins errados no painel web (429), aviso de sobrecarga |
 | `test_robustez.py` | Registro em arquivo (sem duplicar, sem crescer sem fim), análise que recomeça sozinha e que desiste depois de muitas falhas, erro de botão indo para o log, título da faixa igual na tela e no painel web |
 | `test_acesso_web.py` | Painel web ajustado na tela: hash da senha, validação dos campos, ajustes salvos sem a senha, servidor aceitando a senha nova, "Aplicar" reiniciando o painel e porta em uso |
 | `test_temas.py` | Tema escuro e claro: paletas compatíveis, troca com o programa aberto, preferência salva |
@@ -724,6 +794,8 @@ No GitHub, os testes rodam sozinhos a cada envio de código (arquivo `.github/wo
 | Problema | Solução |
 |---|---|
 | **Algo deu errado e ninguém viu a mensagem** | Abra `logs/safetech.log`: cada erro fica lá com data, hora, de qual parte do programa veio e o detalhe completo. O arquivo não cresce sem fim (veja `TAMANHO_MAXIMO_LOG_BYTES`). |
+| **Selo amarelo "Sobrecarga" no cabeçalho** | O computador não está dando conta de analisar todas as áreas. Clique no selo (abre Configurações > Análise) e aumente o **intervalo de análise**, feche áreas que não estão em uso, ou use o substream (menor resolução) nas câmeras IP. O selo some sozinho quando normaliza. |
+| **O painel web responde "Muitas tentativas de login"** | Aquele aparelho errou a senha várias vezes e está bloqueado por alguns minutos (`PAINEL_WEB_BLOQUEIO_SEG`). Espere e tente com a senha certa. Se for a catraca pelo Wi-Fi, confira usuário e senha no `config.h` dela. |
 | **A faixa mostra "REINICIANDO A ANÁLISE"** | A análise daquela câmera teve um erro inesperado e vai recomeçar sozinha em alguns segundos. Se repetir muitas vezes seguidas, ela para e mostra "ERRO NA ANÁLISE"; o motivo está em `logs/safetech.log`. |
 | **"Nenhum modelo encontrado em 'modelos/'"** | Recupere os arquivos de `modelos/` do repositório, ou colete imagens e rode `python treinar.py`. |
 | **A escolha de setor e EPIs está cinza** | O programa está usando o modelo antigo, que não distingue os EPIs. Colete imagens rotuladas e rode `python treinar.py`. |

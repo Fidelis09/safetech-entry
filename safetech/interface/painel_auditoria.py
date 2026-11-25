@@ -31,13 +31,17 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 
 from safetech import config
+from safetech.interface import dialogos
+from safetech.interface.componentes import dica
 from safetech.interface.tema import CORES, FONTES
-from safetech.nucleo import modos
+from safetech.nucleo import horario, modos
+from safetech.nucleo.epis import chave_do_epi, ler_confiancas
+from safetech.nucleo.icones import desenhar_icone_epi
 
 
 # Colunas da tabela: (campo do registro, título exibido, largura, alinhamento)
 COLUNAS_TABELA = [
-    ("timestamp", "Data e hora", 150, "w"),
+    ("timestamp", "Data e hora", 165, "w"),
     ("pessoa", "Pessoa", 60, "center"),
     ("setor", "Setor", 125, "w"),
     ("faltando", "Faltando", 160, "w"),
@@ -47,6 +51,9 @@ COLUNAS_TABELA = [
 
 # Texto ao lado do título quando a auditoria mostra todas as áreas
 TEXTO_TODAS_AS_AREAS = "Todas as áreas"
+
+# Opção da lista de períodos que pede duas datas
+PERIODO_PERSONALIZADO = "Escolher datas..."
 
 # Textos mostrados no lugar da tabela quando ela está vazia
 TEXTO_SEM_EVENTOS = "Nenhum evento registrado ainda.\nOs eventos aparecem aqui assim que alguém é analisado."
@@ -60,12 +67,33 @@ FILTRO_TODOS = "todos"
 FILTRO_LIBERADOS = "SIM"
 FILTRO_NEGADOS = "NAO"
 
-ALTURA_EVIDENCIA = 190
+# Parte da largura do painel que a foto do evento selecionado pode ocupar
+FRACAO_LARGURA_FOTO = 0.38
+
+# Altura máxima da foto do evento selecionado (px a 100% de escala)
+ALTURA_EVIDENCIA = 150
+
+# Barras de confiança do evento selecionado: altura de cada linha e
+# tamanho do ícone do EPI (px a 100% de escala)
+ALTURA_LINHA_CONFIANCA = 24
+TAMANHO_ICONE_CONFIANCA = 18
 
 
 class PainelAuditoria(ttk.Frame):
 
-    def __init__(self, pai, pasta_imagens, ao_zerar, ao_excluir, ao_salvar_relatorio, ao_exportar=None, escala=1.0):
+    def __init__(
+        self,
+        pai,
+        pasta_imagens,
+        ao_zerar,
+        ao_excluir,
+        ao_salvar_relatorio,
+        ao_exportar=None,
+        ao_indicadores=None,
+        colunas_visiveis=None,
+        ao_mudar_colunas=None,
+        escala=1.0,
+    ):
         """
         ao_zerar            -> chamado pelo botão "Zerar" (sem argumentos).
         ao_excluir          -> chamado pelo botão "Excluir" com o
@@ -86,6 +114,21 @@ class PainelAuditoria(ttk.Frame):
         self._ao_excluir = ao_excluir
         self._ao_salvar_relatorio = ao_salvar_relatorio
         self._ao_exportar = ao_exportar
+        self._ao_indicadores = ao_indicadores
+        self._ao_mudar_colunas = ao_mudar_colunas or (lambda _colunas: None)
+
+        # Colunas que aparecem (as outras ficam escondidas, não somem dos dados)
+        todas = [campo for campo, *_ in COLUNAS_TABELA]
+        escolhidas = [campo for campo in (colunas_visiveis or todas) if campo in todas]
+
+        self._mostrar_coluna = {campo: tk.BooleanVar(value=campo in (escolhidas or todas)) for campo in todas}
+
+        # Quantas linhas a tabela mostra agora ("Mostrar mais" aumenta)
+        self._limite_linhas = config.MAXIMO_LINHAS_TABELA
+
+        # Período com datas escolhidas: (inicio, fim) "AAAA-MM-DD", ou None
+        self._intervalo = None
+        self._periodo_anterior = config.PERIODO_AUDITORIA_PADRAO
         self._pasta_imagens = pasta_imagens
         self._escala = escala
         self._altura_evidencia = int(ALTURA_EVIDENCIA * escala)
@@ -108,8 +151,12 @@ class PainelAuditoria(ttk.Frame):
 
         self._imagem_evidencia = None
 
+        # Evento mostrado nas barras de confiança e os ícones já desenhados
+        self._registro_nas_barras = None
+        self._icones = {}
+
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(3, weight=1)
+        self.rowconfigure(4, weight=1)
 
         self._montar_cabecalho()
         self._montar_indicadores()
@@ -139,31 +186,44 @@ class PainelAuditoria(ttk.Frame):
         # (relatório e excluir) ficam no cartão do evento selecionado,
         # embaixo, junto da foto.
         #
-        # Zerar fica por último e em tom discreto: é a mais drástica.
-        # Quem confirma com o usuário e arquiva os dados é a janela principal.
-        ttk.Button(
-            cabecalho,
-            text="Zerar",
-            style="Suave.Perigo.TButton",
-            command=self._ao_zerar,
-            takefocus=False,
-        ).pack(side="right")
+        # "Mais ▾": abrir a pasta e zerar. Zerar é a ação mais drástica:
+        # fica dentro do menu, longe de um clique sem querer. Quem confirma
+        # com o usuário e arquiva os dados é a janela principal.
+        self._menu_mais = tk.Menu(
+            self,
+            tearoff=False,
+            bg=CORES["cartao"],
+            fg=CORES["texto"],
+            activebackground=CORES["destaque"],
+            activeforeground="white",
+        )
+        self._menu_mais.add_command(label="Abrir a pasta da auditoria", command=self._abrir_pasta)
+        self._menu_mais.add_separator()
+        self._menu_mais.add_command(label="Zerar a auditoria...", command=self._ao_zerar, foreground=CORES["perigo_texto"])
 
-        ttk.Button(
-            cabecalho,
-            text="Abrir pasta",
-            command=self._abrir_pasta,
-            takefocus=False,
-        ).pack(side="right", padx=(0, 8))
+        dica(
+            ttk.Menubutton(cabecalho, text="Mais ▾", menu=self._menu_mais, style="TButton", takefocus=False),
+            "Abrir a pasta da auditoria e zerar (nada é apagado: vai para auditoria/arquivados)",
+        ).pack(side="right")
 
         # Planilha com o que está filtrado na tela (período, resultado, busca)
         self._botao_exportar = ttk.Button(
             cabecalho,
-            text="Exportar CSV",
+            text="Exportar",
             command=self._exportar_filtrados,
             takefocus=False,
         )
         self._botao_exportar.pack(side="right", padx=(0, 8))
+
+        dica(self._botao_exportar, "Grava numa planilha (Excel) os eventos que estão filtrados na tela")
+
+        # Gráficos e relatório em PDF (janela à parte)
+        if self._ao_indicadores is not None:
+
+            dica(
+                ttk.Button(cabecalho, text="Indicadores", style="Secundario.TButton", command=self._ao_indicadores, takefocus=False),
+                "Gráficos (EPI que mais falta, conformidade por área e por dia, horários críticos) e relatório em PDF",
+            ).pack(side="right", padx=(0, 8))
 
     def _montar_indicadores(self):
 
@@ -223,7 +283,7 @@ class PainelAuditoria(ttk.Frame):
         caixa_periodo = ttk.Combobox(
             linha,
             textvariable=self._periodo,
-            values=list(config.PERIODOS_AUDITORIA),
+            values=[*config.PERIODOS_AUDITORIA, PERIODO_PERSONALIZADO],
             state="readonly",
             width=15,
             style="Pequena.TCombobox",
@@ -232,10 +292,20 @@ class PainelAuditoria(ttk.Frame):
         caixa_periodo.pack(side="left", padx=(8, 0))
         caixa_periodo.bind("<<ComboboxSelected>>", lambda _evento: self._ao_mudar_periodo(caixa_periodo))
 
-        self._campo_filtro = ttk.Entry(linha, textvariable=self._texto_filtro)
-        self._campo_filtro.pack(side="right", fill="x", expand=True, padx=(8, 0))
+        # Escolher as colunas da tabela (um menu com uma caixa por coluna)
+        self._botao_colunas = ttk.Button(linha, text="Colunas", command=self._abrir_menu_colunas, takefocus=False)
+        self._botao_colunas.pack(side="left", padx=(8, 0))
 
-        ttk.Label(linha, text="Buscar", style="Suave.Painel.TLabel").pack(side="right", padx=(12, 0))
+        dica(self._botao_colunas, "Escolhe quais colunas aparecem na tabela (fica salvo)")
+
+        # Busca numa linha própria, embaixo: cabe inteira mesmo com o painel estreito
+        linha_busca = ttk.Frame(self, style="Painel.TFrame")
+        linha_busca.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+
+        ttk.Label(linha_busca, text="Buscar", style="Suave.Painel.TLabel").pack(side="left", padx=(0, 8))
+
+        self._campo_filtro = ttk.Entry(linha_busca, textvariable=self._texto_filtro)
+        self._campo_filtro.pack(side="left", fill="x", expand=True)
 
         # Refaz a tabela a cada tecla digitada na busca
         self._texto_filtro.trace_add("write", lambda *_: self._redesenhar_tabela())
@@ -243,7 +313,7 @@ class PainelAuditoria(ttk.Frame):
     def _montar_tabela(self):
 
         moldura = ttk.Frame(self, style="Cartao.TFrame")
-        moldura.grid(row=3, column=0, sticky="nsew")
+        moldura.grid(row=4, column=0, sticky="nsew")
 
         moldura.columnconfigure(0, weight=1)
         moldura.rowconfigure(0, weight=1)
@@ -289,6 +359,22 @@ class PainelAuditoria(ttk.Frame):
         self._tabela.grid(row=0, column=0, sticky="nsew")
         barra.grid(row=0, column=1, sticky="ns")
 
+        # Embaixo da tabela: "Mostrando 500 de 1.234" e o botão para ver mais
+        self._linha_mais = ttk.Frame(moldura, style="Cartao.TFrame", padding=(10, 6))
+
+        self._rotulo_quantas = ttk.Label(self._linha_mais, text="", style="Suave.Cartao.TLabel")
+        self._rotulo_quantas.pack(side="left")
+
+        ttk.Button(
+            self._linha_mais,
+            text=f"Mostrar mais {config.MAXIMO_LINHAS_TABELA}",
+            style="Secundario.TButton",
+            command=self.mostrar_mais,
+            takefocus=False,
+        ).pack(side="right")
+
+        self._aplicar_colunas()
+
         self._tabela.bind("<<TreeviewSelect>>", self._ao_selecionar)
         self._tabela.bind("<Double-1>", self._ao_duplo_clique)
 
@@ -298,7 +384,7 @@ class PainelAuditoria(ttk.Frame):
     def _montar_evidencia(self):
 
         cartao = ttk.Frame(self, style="Cartao.TFrame", padding=12)
-        cartao.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        cartao.grid(row=5, column=0, sticky="ew", pady=(12, 0))
 
         cabeca = ttk.Frame(cartao, style="Cartao.TFrame")
         cabeca.pack(fill="x")
@@ -325,6 +411,8 @@ class PainelAuditoria(ttk.Frame):
         )
         self._botao_excluir.pack(side="right")
 
+        dica(self._botao_excluir, "Tira este evento do log (ele é guardado em auditoria/excluidos). Tecla Delete")
+
         # Relatório completo do momento (dados do evento, confiança de
         # cada EPI e a foto), aberto no navegador
         self._botao_relatorio = ttk.Button(
@@ -337,24 +425,47 @@ class PainelAuditoria(ttk.Frame):
         )
         self._botao_relatorio.pack(side="right", padx=(0, 8))
 
+        dica(self._botao_relatorio, "Relatório completo deste momento (dados, confiança de cada EPI e a foto), aberto no navegador")
+
+        # Embaixo do título: a foto à esquerda e os detalhes à direita (lado
+        # a lado, para o cartão não roubar a altura da tabela)
+        corpo = ttk.Frame(cartao, style="Cartao.TFrame")
+        corpo.pack(fill="x", pady=(8, 0))
+
+        corpo.columnconfigure(0, weight=2, uniform="evento")
+        corpo.columnconfigure(1, weight=3, uniform="evento")
+
         self._rotulo_evidencia = tk.Label(
-            cartao,
+            corpo,
             bg=CORES["cartao"],
             fg=CORES["texto_suave"],
             font=FONTES["pequena"],
             height=1,
         )
-        self._rotulo_evidencia.pack(fill="x", pady=(8, 0))
+        self._rotulo_evidencia.grid(row=0, column=0, sticky="nw")
 
-        # Detalhes do evento selecionado: o que o setor exigia e a
-        # confiança de cada EPI no momento da decisão
+        lado = ttk.Frame(corpo, style="Cartao.TFrame")
+        lado.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+
+        # Detalhes do evento selecionado: tipo, área, modo e setor
         self._rotulo_detalhes = ttk.Label(
-            cartao,
+            lado,
             text="",
             style="Suave.Cartao.TLabel",
             justify="left",
         )
-        self._rotulo_detalhes.pack(anchor="w", pady=(6, 0))
+        self._rotulo_detalhes.pack(anchor="w")
+
+        # O texto quebra na largura do lado direito (e não empurra o painel)
+        lado.bind("<Configure>", lambda evento: self._rotulo_detalhes.config(wraplength=max(120, evento.width - 4)))
+
+        # Uma linha por EPI: ícone, nome, barra da confiança e o número.
+        # Vermelho = faltou (exigido e abaixo do limiar); verde = exigido
+        # e presente; cinza = o setor não exigia
+        self._tela_confiancas = tk.Canvas(lado, bg=CORES["cartao"], highlightthickness=0, height=1)
+        self._tela_confiancas.pack(fill="x", pady=(6, 0))
+
+        self._tela_confiancas.bind("<Configure>", lambda _evento: self._desenhar_confiancas())
 
         self._mostrar_texto_evidencia(TEXTO_SEM_SELECAO)
 
@@ -390,7 +501,7 @@ class PainelAuditoria(ttk.Frame):
             # Mantém o limite de linhas removendo a mais antiga
             linhas = self._tabela.get_children()
 
-            if len(linhas) > config.MAXIMO_LINHAS_TABELA:
+            if len(linhas) > self._limite_linhas:
                 self._remover_linha(linhas[-1])
 
             # A linha nova empurrou as outras: refaz as listras
@@ -420,6 +531,9 @@ class PainelAuditoria(ttk.Frame):
 
         self._rotulo_detalhes.config(text="")
 
+        self._registro_nas_barras = None
+        self._desenhar_confiancas()
+
         self._ativar_botoes_da_linha(False)
 
         self._mostrar_texto_evidencia(TEXTO_SEM_SELECAO)
@@ -437,6 +551,11 @@ class PainelAuditoria(ttk.Frame):
         self._tabela.tag_configure("negado", foreground=CORES["perigo_texto"])
         self._tabela.tag_configure("par", background=CORES["linha_par"])
         self._tabela.tag_configure("impar", background=CORES["linha_impar"])
+
+        # As barras do evento selecionado também têm cores do tema
+        if hasattr(self, "_tela_confiancas"):
+            self._icones = {}
+            self._desenhar_confiancas()
 
     def definir_area(self, nome):
         """
@@ -510,6 +629,13 @@ class PainelAuditoria(ttk.Frame):
     def _no_periodo(self, registro) -> bool:
         """O evento aconteceu dentro do período escolhido?"""
 
+        # Datas escolhidas pelo usuário
+        if self._intervalo is not None:
+
+            inicio, fim = self._intervalo
+
+            return inicio <= horario.data(registro.timestamp) <= fim
+
         dias = config.PERIODOS_AUDITORIA.get(self._periodo.get())
 
         if dias is None:
@@ -519,14 +645,99 @@ class PainelAuditoria(ttk.Frame):
         # da data já compara a ordem cronológica
         limite = (date.today() - timedelta(days=dias)).isoformat()
 
-        return registro.timestamp[:10] >= limite
+        return horario.data(registro.timestamp) >= limite
 
     def _ao_mudar_periodo(self, caixa):
 
         # Tira a seleção azul do texto, que o Tkinter deixa na caixa
         caixa.selection_clear()
 
+        if self._periodo.get() == PERIODO_PERSONALIZADO:
+
+            inicio, fim = self._intervalo or (None, None)
+
+            escolhido = dialogos.pedir_intervalo(self.winfo_toplevel(), inicio, fim)
+
+            if escolhido is None:
+
+                # Cancelou: volta ao período de antes
+                self._periodo.set(self._periodo_anterior)
+                return
+
+            self.definir_intervalo(*escolhido)
+            return
+
+        self._intervalo = None
+        self._periodo_anterior = self._periodo.get()
+
+        self._limite_linhas = config.MAXIMO_LINHAS_TABELA
+
         self._atualizar_indicadores()
+        self._redesenhar_tabela()
+
+    def definir_intervalo(self, inicio, fim):
+        """Período com datas escolhidas (inclusive), "AAAA-MM-DD"."""
+
+        self._intervalo = (inicio, fim)
+
+        # A caixa mostra as datas escolhidas, ex.: "12/11 a 25/11/2026"
+        texto = f"{inicio[8:10]}/{inicio[5:7]} a {fim[8:10]}/{fim[5:7]}/{fim[0:4]}"
+
+        self._periodo.set(texto)
+        self._periodo_anterior = texto
+
+        self._limite_linhas = config.MAXIMO_LINHAS_TABELA
+
+        self._atualizar_indicadores()
+        self._redesenhar_tabela()
+
+    # ------------------------------------------------------
+    # COLUNAS E "MOSTRAR MAIS"
+    # ------------------------------------------------------
+
+    def _abrir_menu_colunas(self):
+
+        menu = tk.Menu(
+            self,
+            tearoff=False,
+            bg=CORES["cartao"],
+            fg=CORES["texto"],
+            activebackground=CORES["destaque"],
+            activeforeground="white",
+            selectcolor=CORES["texto"],
+        )
+
+        for campo, titulo, *_ in COLUNAS_TABELA:
+            menu.add_checkbutton(label=titulo, variable=self._mostrar_coluna[campo], command=self._ao_mudar_coluna)
+
+        botao = self._botao_colunas
+
+        menu.tk_popup(botao.winfo_rootx(), botao.winfo_rooty() + botao.winfo_height())
+
+    def _ao_mudar_coluna(self):
+
+        # Pelo menos uma coluna fica sempre à vista
+        if not any(variavel.get() for variavel in self._mostrar_coluna.values()):
+            self._mostrar_coluna["timestamp"].set(True)
+
+        self._aplicar_colunas()
+
+        self._ao_mudar_colunas(self.colunas_visiveis())
+
+    def colunas_visiveis(self):
+        """Campos das colunas que aparecem, na ordem da tabela."""
+
+        return [campo for campo, *_ in COLUNAS_TABELA if self._mostrar_coluna[campo].get()]
+
+    def _aplicar_colunas(self):
+
+        self._tabela.configure(displaycolumns=self.colunas_visiveis())
+
+    def mostrar_mais(self):
+        """Botão "Mostrar mais": a tabela passa a mostrar mais linhas."""
+
+        self._limite_linhas += config.MAXIMO_LINHAS_TABELA
+
         self._redesenhar_tabela()
 
     def _passa_no_filtro(self, registro) -> bool:
@@ -544,7 +755,10 @@ class PainelAuditoria(ttk.Frame):
         if not busca:
             return True
 
-        return any(busca in str(valor).lower() for valor in registro.como_linha())
+        # Também busca pela data como aparece na tela (sem o "T" e o fuso)
+        valores = [*registro.como_linha(), horario.para_exibir(registro.timestamp)]
+
+        return any(busca in str(valor).lower() for valor in valores)
 
     def _redesenhar_tabela(self):
 
@@ -564,10 +778,19 @@ class PainelAuditoria(ttk.Frame):
 
             visiveis.sort(key=lambda registro: self._chave_de_ordenacao(registro, campo), reverse=not crescente)
 
-        for registro in visiveis[: config.MAXIMO_LINHAS_TABELA]:
+        for registro in visiveis[: self._limite_linhas]:
             self._inserir_linha(registro, posicao="end")
 
         self._reaplicar_listras()
+
+        # Há mais eventos do que linhas na tela: mostra quantos e o botão
+        if len(visiveis) > self._limite_linhas:
+
+            self._rotulo_quantas.config(text=f"Mostrando {self._limite_linhas} de {len(visiveis)} eventos")
+            self._linha_mais.grid(row=1, column=0, columnspan=2, sticky="ew")
+
+        else:
+            self._linha_mais.grid_remove()
 
     def registros_filtrados(self):
         """Todos os registros que passam nos filtros (sem o limite de linhas da tela), do mais antigo ao mais recente."""
@@ -609,7 +832,8 @@ class PainelAuditoria(ttk.Frame):
         liberado = registro.liberado == "SIM"
 
         valores = [
-            registro.timestamp,
+            # Fácil de ler; o fuso fica no relatório e na planilha
+            horario.para_exibir(registro.timestamp),
             registro.pessoa,
             registro.setor,
             registro.faltando or "-",
@@ -645,6 +869,11 @@ class PainelAuditoria(ttk.Frame):
     @staticmethod
     def _chave_de_ordenacao(registro, campo):
 
+        # A data pelo jeito de exibir: ordena junto eventos novos (com
+        # fuso) e antigos (sem fuso)
+        if campo == "timestamp":
+            return horario.para_exibir(registro.timestamp)
+
         # Sem diferenciar maiúsculas de minúsculas
         return getattr(registro, campo).lower()
 
@@ -675,11 +904,13 @@ class PainelAuditoria(ttk.Frame):
 
         self._rotulo_detalhes.config(
             text=(
-                f"{evento}   |   Área: {registro.area}   |   Modo: {modos.nome_do_modo(registro.modo)}   |   "
-                f"Exigidos: {registro.exigidos or 'nenhum'}\n"
-                f"Confiança: {registro.confiancas or '-'}"
+                f"{evento}  ·  {registro.area}  ·  {modos.nome_do_modo(registro.modo)}\n"
+                f"Setor: {registro.setor or '-'}"
             )
         )
+
+        self._registro_nas_barras = registro
+        self._desenhar_confiancas()
 
         caminho = self._pasta_imagens / registro.imagem if registro.imagem else None
 
@@ -690,7 +921,9 @@ class PainelAuditoria(ttk.Frame):
         try:
 
             # Reduz para caber no cartão, mantendo a proporção
-            largura_maxima = max(100, self._rotulo_evidencia.winfo_width() - 8)
+            # No máximo 38% da largura do painel: a foto divide o cartão com
+            # as barras. (Medir a própria foto faria ela crescer a cada clique.)
+            largura_maxima = max(100, int(self.winfo_width() * FRACAO_LARGURA_FOTO))
 
             # O "with" fecha o arquivo assim que a miniatura fica
             # pronta. Sem isso o Windows manteria a foto "em uso" e o
@@ -706,6 +939,72 @@ class PainelAuditoria(ttk.Frame):
             return
 
         self._rotulo_evidencia.config(image=self._imagem_evidencia, text="", height=self._altura_evidencia)
+
+    def _icone(self, chave, cor):
+        """Ícone do EPI na cor dada (guardado: o Tkinter apaga imagem sem referência)."""
+
+        tamanho = int(TAMANHO_ICONE_CONFIANCA * self._escala)
+
+        if (chave, cor) not in self._icones:
+            self._icones[(chave, cor)] = ImageTk.PhotoImage(desenhar_icone_epi(chave, tamanho, cor))
+
+        return self._icones[(chave, cor)]
+
+    def _desenhar_confiancas(self):
+        """Barras de confiança do evento selecionado (nada sem evento)."""
+
+        tela = self._tela_confiancas
+        tela.delete("all")
+
+        registro = self._registro_nas_barras
+
+        itens = ler_confiancas(registro.confiancas) if registro is not None else []
+
+        altura_linha = int(ALTURA_LINHA_CONFIANCA * self._escala)
+
+        tela.configure(height=max(1, altura_linha * len(itens)))
+
+        if not itens:
+            return
+
+        exigidos = {nome.strip() for nome in registro.exigidos.split(",") if nome.strip()}
+        faltando = {nome.strip() for nome in registro.faltando.split(",") if nome.strip()}
+
+        largura = max(200, tela.winfo_width())
+
+        inicio_nome = int(26 * self._escala)
+        inicio_barra = int(100 * self._escala)
+        fim_barra = largura - int(92 * self._escala)
+
+        for posicao, (nome, confianca) in enumerate(itens):
+
+            if nome in faltando:
+                cor, legenda = CORES["perigo"], "faltou"
+            elif nome in exigidos:
+                cor, legenda = CORES["sucesso"], "ok"
+            else:
+                cor, legenda = CORES["texto_suave"], "não exigido"
+
+            meio = posicao * altura_linha + altura_linha // 2
+
+            chave = chave_do_epi(nome)
+
+            if chave:
+                tela.create_image(0, meio, image=self._icone(chave, cor), anchor="w")
+
+            tela.create_text(inicio_nome, meio, text=nome, anchor="w", fill=CORES["texto"], font=FONTES["texto"])
+
+            grossura = max(6, altura_linha // 3)
+
+            tela.create_rectangle(inicio_barra, meio - grossura // 2, fim_barra, meio + grossura // 2, fill=CORES["borda"], outline="")
+
+            ponta = inicio_barra + int((fim_barra - inicio_barra) * max(0.0, min(1.0, confianca)))
+
+            tela.create_rectangle(inicio_barra, meio - grossura // 2, ponta, meio + grossura // 2, fill=cor, outline="")
+
+            tela.create_text(
+                fim_barra + 8, meio, text=f"{confianca * 100:.0f}%  {legenda}", anchor="w", fill=CORES["texto_suave"], font=FONTES["pequena"]
+            )
 
     def _mostrar_texto_evidencia(self, texto):
 

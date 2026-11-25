@@ -11,13 +11,12 @@ que respondem sozinhas.
 
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox
 
 import numpy as np
 import pytest
 
 from safetech import config
-from safetech.interface import janela_principal
+from safetech.interface import dialogos, janela_principal
 from safetech.interface import controlador_catraca
 from safetech.interface import controlador_cameras
 from safetech.interface import controlador_areas
@@ -30,7 +29,7 @@ from testes.falsos import CameraParada
 def janela(raiz, sem_ia, monkeypatch):
 
     # Toda confirmação responde "sim"; o navegador só anota o endereço
-    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    monkeypatch.setattr(dialogos, "confirmar", lambda *a, **k: True)
 
     abertos = []
     monkeypatch.setattr(webbrowser, "open", abertos.append)
@@ -747,7 +746,7 @@ def test_pagina_da_camera_mostra_a_camera_e_a_tela_de_espera(janela):
     painel = janela._painel_monitoramento
 
     assert painel._rotulo_camera.cget("text") == "Câmera 0"
-    assert painel._rotulo_catraca.cget("text") == "comanda a catraca"
+    assert "catraca" in painel._rotulo_catraca.cget("text")
 
     painel.mostrar_mensagem("Câmera desligada\nLigue a câmera.", botao="Iniciar câmera")
 
@@ -766,8 +765,9 @@ def test_chips_dos_epis_marcam_o_exigido(janela):
 
     painel.mostrar_fiscalizacao("Laboratório", ("oculos", "luvas"))
 
-    assert painel._chips["oculos"].cget("text").startswith("\u2713")
-    assert not painel._chips["capacete"].cget("text").startswith("\u2713")
+    # O "\u2713" vem logo depois do \u00edcone
+    assert "\u2713" in painel._chips["oculos"].cget("text")
+    assert "\u2713" not in painel._chips["capacete"].cget("text")
 
 
 def test_capturar_foto_sem_camera_so_avisa(janela):

@@ -1,5 +1,5 @@
 """
-Capturas manuais: o botão "Capturar foto" da câmera de uma área.
+Capturas manuais: o botão "Foto" da câmera de uma área.
 
 Diferente da foto de evidência (que a análise grava sozinha quando a
 decisão de alguém muda), a captura é do OPERADOR: ele vê algo na
@@ -12,12 +12,11 @@ config.PASTA_CAPTURAS.
 """
 
 import re
-from datetime import datetime
 
 import cv2
 
 from safetech import config
-from safetech.nucleo import anotacao
+from safetech.nucleo import anotacao, horario
 
 
 def salvar(frame, estado, nome_area, pasta=None):
@@ -33,11 +32,16 @@ def salvar(frame, estado, nome_area, pasta=None):
     pasta = pasta or config.PASTA_CAPTURAS
     pasta.mkdir(parents=True, exist_ok=True)
 
-    agora = datetime.now()
+    agora = horario.agora()
 
     imagem = anotacao.desenhar_pessoas(frame.copy(), estado.pessoas, modo=estado.modo)
 
-    carimbo = f"{config.NOME_PRODUTO} | {agora:%Y-%m-%d %H:%M:%S} | Area: {nome_area} | Captura manual"
+    momento = agora.isoformat(timespec="seconds")
+
+    carimbo = (
+        f"{config.NOME_PRODUTO} | {horario.para_exibir(momento)} UTC{horario.fuso(momento)} "
+        f"| Area: {nome_area} | Captura manual"
+    )
 
     anotacao.carimbar(imagem, anotacao.sem_acentos(carimbo))
 

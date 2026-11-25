@@ -38,6 +38,7 @@ config.PASTA_EXCLUIDOS = config.PASTA_AUDITORIA / "excluidos"
 config.PASTA_RELATORIOS = config.PASTA_AUDITORIA / "relatorios"
 config.PASTA_CAPTURAS = config.PASTA_AUDITORIA / "capturas"
 config.PASTA_LOGS = PASTA_TEMPORARIA / "logs"
+config.PASTA_RELATORIOS_DIARIOS = config.PASTA_RELATORIOS / "diarios"
 config.PASTA_IMAGENS_DATASET = PASTA_TEMPORARIA / "dataset" / "epis"
 config.ARQUIVO_ROTULOS = PASTA_TEMPORARIA / "dataset" / "rotulos.csv"
 config.ARQUIVO_PREFERENCIAS = PASTA_TEMPORARIA / "preferencias.json"
@@ -57,6 +58,11 @@ config.ALERTA_SONORO_NEGADO = False
 # Hash da senha do painel bem mais rápido nos testes (no programa de
 # verdade ele é lento de propósito). O formato é o mesmo.
 config.ITERACOES_HASH_SENHA = 1000
+
+# Nada de gerar relatórios PDF sozinho, nem abrir o assistente de
+# primeira execução, durante os testes
+config.RELATORIO_DIARIO_AUTOMATICO = False
+config.ASSISTENTE_NA_PRIMEIRA_EXECUCAO = False
 
 
 # ============================================================
@@ -113,7 +119,11 @@ def criar_janela_tk(tentativas=5):
             mensagem = str(erro)
 
             # Falha ao LER um arquivo .tcl do próprio Tk (init.tcl, tk.tcl, auto.tcl...)
-            passageira = ".tcl" in mensagem and ("usable" in mensagem or "couldn't read file" in mensagem)
+            # (ou "invalid command name tcl_findLibrary", a mesma falha
+            # aparecendo um passo depois)
+            passageira = (
+                ".tcl" in mensagem and ("usable" in mensagem or "couldn't read file" in mensagem)
+            ) or "tcl_findLibrary" in mensagem
 
             if not passageira or tentativa == tentativas - 1:
                 raise
